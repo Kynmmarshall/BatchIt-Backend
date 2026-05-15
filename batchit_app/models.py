@@ -3,6 +3,8 @@ from django.db import models
 from django.contrib.auth.models import AbstractBaseUser, BaseUserManager, PermissionsMixin
 from django.core.validators import MinValueValidator
 from django.conf import settings
+from django.db import models, transaction
+from django.core.exceptions import ValidationError
 
 # ─────────────────────────────────────────────
 # CUSTOMER
@@ -271,24 +273,36 @@ class Batch(models.Model):
 # ─────────────────────────────────────────────
 
 class BatchParticipant(models.Model):
+
     class Status(models.TextChoices):
         PENDING = "pending", "Pending"
         CONFIRMED = "confirmed", "Confirmed"
         FULFILLED = "fulfilled", "Fulfilled"
 
-    participant_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    participant_id = models.UUIDField(
+        primary_key=True,
+        default=uuid.uuid4,
+        editable=False
+    )
+
     batch = models.ForeignKey(
         Batch,
         on_delete=models.CASCADE,
         related_name="participants",
     )
+
     customer = models.ForeignKey(
         Customer,
         on_delete=models.CASCADE,
         related_name="batch_participations",
     )
-    quantity_requested = models.PositiveIntegerField(validators=[MinValueValidator(1)])
+
+    quantity_requested = models.PositiveIntegerField(
+        validators=[MinValueValidator(1)]
+    )
+
     joined_at = models.DateTimeField(auto_now_add=True)
+
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
@@ -296,17 +310,49 @@ class BatchParticipant(models.Model):
     )
 
     class Meta:
-        db_table = "batch_participants"
         unique_together = [("batch", "customer")]
-        verbose_name = "Batch Participant"
-        verbose_name_plural = "Batch Participants"
 
-    def __str__(self):
-        return (
-            f"{self.customer.name} in batch {self.batch.batch_id} "
-            f"({self.quantity_requested} units)"
-        )
+    def save(self, *args, **kwargs):
 
+        with transaction.atomic():
+
+            # Lock batch row to prevent race conditions
+            batch = Batch.objects.select_for_update().get(
+                pk=self.batch.pk
+            )
+
+            old_quantity = 0
+
+            # If updating existing participant
+            if self.pk:
+                old = BatchParticipant.objects.get(pk=self.pk)
+                old_quantity = old.quantity_requested
+
+            new_total = (
+                batch.filled_quantity
+                - old_quantity
+                + self.quantity_requested
+            )
+
+            # Prevent overfilling
+            if new_total > batch.total_quantity:
+                raise ValidationError(
+                    "Batch quantity exceeded."
+                )
+
+            # Save participant
+            super().save(*args, **kwargs)
+
+            # Update batch
+            batch.filled_quantity = new_total
+
+            # Auto-update status
+            if batch.filled_quantity >= batch.total_quantity:
+                batch.status = Batch.Status.FILLED
+            else:
+                batch.status = Batch.Status.OPEN
+
+            batch.save()
 
 # ─────────────────────────────────────────────
 # NOTIFICATION
