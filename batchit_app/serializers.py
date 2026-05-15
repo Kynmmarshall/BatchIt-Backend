@@ -1,7 +1,6 @@
 from rest_framework import serializers
 from .models import *
 
-
 class BatchSerializer(serializers.ModelSerializer):
 
     remaining_quantity = serializers.ReadOnlyField()
@@ -37,7 +36,7 @@ class ProductSerializer(serializers.ModelSerializer):
     class Meta:
         model = Product
         fields = '__all__'
-        read_only_fields = ('product_id', 'created_at', 'updated_at') # 'updated_at'
+        read_only_fields = ('product_id', 'created_at', 'updated_at')
 
 
 
