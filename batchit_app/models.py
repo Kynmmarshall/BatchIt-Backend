@@ -10,7 +10,7 @@ class Customer(AbstractUser):
     Inherits from Django's AbstractUser for authentication and basic fields.
     """
     customer_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    # username, first_name, last_name, email, password, is_active, date_joined are inherited
+    email = models.EmailField(unique=True)
     phone = models.CharField(max_length=20, blank=True, null=True)
     profile_photo_url = models.URLField(blank=True, null=True)
     preferences = models.JSONField(blank=True, null=True, default=dict) # e.g., product categories, budget range, region
