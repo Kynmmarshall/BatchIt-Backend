@@ -62,7 +62,7 @@ fi
 source "${VENV_DIR}/bin/activate"
 
 echo "[deploy] Upgrading pip and installing requirements"
-python -m pip install --upgrade pip setuptools wheel
+python -m pip install --upgrade pip 'setuptools<71' wheel
 if [ -f requirements.txt ]; then
   pip install -r requirements.txt
 else
