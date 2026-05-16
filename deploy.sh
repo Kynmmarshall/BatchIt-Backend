@@ -114,8 +114,6 @@ Next steps (recommended):
  - Use a secrets manager or environment variables for DB credentials rather than hardcoding.
  - Review firewall rules to allow DB only from trusted hosts if DB is remote.
 
-To run this script:
-sudo DB_NAME=batchit DB_USER=batchit_user DB_PASS='S3cure!' APP_DIR=/path/to/repo ./deploy.sh
 EOF
 
 exit 0
