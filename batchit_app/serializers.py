@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import authenticate
-from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription
+from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription, EmailVerificationCode
 
 # Existing BatchSerializer
 class BatchSerializer(serializers.ModelSerializer):
@@ -245,3 +245,69 @@ class AuthDetailSerializer(serializers.ModelSerializer):
             'profile_photo_url',
             'created_at',
         )
+
+
+class SendVerificationCodeSerializer(serializers.Serializer):
+    """
+    Serializer for requesting an email verification code.
+    """
+    email = serializers.EmailField()
+
+
+class VerifyEmailCodeSerializer(serializers.Serializer):
+    """
+    Serializer for verifying an email code.
+    Used during registration to verify email before creating account.
+    """
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6, min_length=6)
+
+
+class RegisterWithVerificationSerializer(serializers.Serializer):
+    """
+    Serializer for registration with email verification.
+    Verifies the email code, then creates the user account.
+    """
+    email = serializers.EmailField()
+    code = serializers.CharField(max_length=6, min_length=6)
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(write_only=True, min_length=6)
+    first_name = serializers.CharField(max_length=150, required=False)
+    last_name = serializers.CharField(max_length=150, required=False)
+
+    def validate(self, data):
+        # Verify email code is valid
+        email = data.get('email')
+        code = data.get('code')
+
+        try:
+            verification = EmailVerificationCode.objects.get(email=email, code=code)
+            if not verification.is_valid():
+                raise serializers.ValidationError({'code': 'Verification code has expired or already used.'})
+        except EmailVerificationCode.DoesNotExist:
+            raise serializers.ValidationError({'code': 'Invalid or expired verification code.'})
+
+        # Check email not already registered
+        if Customer.objects.filter(email=email).exists():
+            raise serializers.ValidationError({'email': 'Email already registered.'})
+
+        return data
+
+    def create(self, validated_data):
+        # Mark verification code as used
+        verification = EmailVerificationCode.objects.get(
+            email=validated_data['email'],
+            code=validated_data['code']
+        )
+        verification.is_used = True
+        verification.save()
+
+        # Create customer
+        user = Customer.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data['email'],
+            password=validated_data['password'],
+            first_name=validated_data.get('first_name', ''),
+            last_name=validated_data.get('last_name', ''),
+        )
+        return user

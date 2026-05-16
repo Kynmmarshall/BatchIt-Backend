@@ -2,6 +2,8 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
 import uuid
+import secrets
+import string
 
 
 class Customer(AbstractUser):
@@ -129,3 +131,36 @@ class Subscription(models.Model):
 
     def __str__(self):
         return f"Subscription of {self.customer.email} to {self.provider.business_name}"
+
+
+class EmailVerificationCode(models.Model):
+    """
+    Stores temporary email verification codes sent to users for registration/email verification.
+    Codes expire after a set duration (default: 15 minutes).
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email = models.EmailField(db_index=True)
+    code = models.CharField(max_length=6, db_index=True)  # 6-digit code
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()  # Code expires 15 min after creation
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timezone.timedelta(minutes=15)
+        super().save(*args, **kwargs)
+
+    def is_valid(self):
+        """Check if code has not expired and not been used."""
+        return not self.is_used and timezone.now() < self.expires_at
+
+    @staticmethod
+    def generate_code():
+        """Generate a random 6-digit verification code."""
+        return ''.join(secrets.choice(string.digits) for _ in range(6))
+
+    def __str__(self):
+        return f"Verification code for {self.email}"

@@ -5,13 +5,16 @@ from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
-from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription
+from django.core.mail import send_mail
+from django.conf import settings
+from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription, EmailVerificationCode
 from .serializers import (
     CustomerSerializer, ProviderSerializer, ProductSerializer,
     BatchSerializer, BatchParticipantSerializer, SubscriptionSerializer,
     LoginSerializer, RegisterSerializer, AuthDetailSerializer,
     OrderSerializer, OrderCreateSerializer, OrderStatusUpdateSerializer,
-    JoinBatchSerializer,
+    JoinBatchSerializer, SendVerificationCodeSerializer, VerifyEmailCodeSerializer,
+    RegisterWithVerificationSerializer,
 )
 
 
@@ -281,6 +284,111 @@ class OrderDetail(APIView):
         batch.save(update_fields=['filled_quantity', 'status'])
 
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# --- Email Verification Views ---
+
+class SendVerificationCodeView(APIView):
+    """
+    POST /api/auth/send-verification-code/
+    Send a 6-digit verification code to the provided email.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = SendVerificationCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data['email']
+
+        # Check if email already registered
+        if Customer.objects.filter(email=email).exists():
+            return Response(
+                {'detail': 'Email already registered.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Generate and save verification code
+        code = EmailVerificationCode.generate_code()
+        verification = EmailVerificationCode.objects.create(
+            email=email,
+            code=code,
+        )
+
+        # Send email with verification code
+        try:
+            send_mail(
+                subject='BatchIt - Email Verification Code',
+                message=f'Your verification code is: {code}\n\nThis code will expire in 15 minutes.',
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[email],
+                fail_silently=False,
+            )
+        except Exception as e:
+            verification.delete()
+            return Response(
+                {'detail': f'Failed to send verification email: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        return Response(
+            {'detail': f'Verification code sent to {email}'},
+            status=status.HTTP_200_OK
+        )
+
+
+class VerifyEmailCodeView(APIView):
+    """
+    POST /api/auth/verify-email-code/
+    Verify the email code (without creating account yet).
+    Used for testing or intermediate verification steps.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = VerifyEmailCodeSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        email = serializer.validated_data['email']
+        code = serializer.validated_data['code']
+
+        try:
+            verification = EmailVerificationCode.objects.get(email=email, code=code)
+            if not verification.is_valid():
+                return Response(
+                    {'detail': 'Verification code has expired or already used.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            return Response(
+                {'detail': 'Verification code is valid.'},
+                status=status.HTTP_200_OK
+            )
+        except EmailVerificationCode.DoesNotExist:
+            return Response(
+                {'detail': 'Invalid or expired verification code.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+class RegisterWithVerificationView(APIView):
+    """
+    POST /api/auth/register-verify/
+    Register a new account with email verification code.
+    Verifies the code, creates the account, and returns token.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = RegisterWithVerificationSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        user = serializer.save()
+        token, created = Token.objects.get_or_create(user=user)
+
+        return Response({
+            'token': token.key,
+            'user': AuthDetailSerializer(user).data,
+        }, status=status.HTTP_201_CREATED)
 
 
 # --- Auth Views ---

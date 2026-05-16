@@ -27,6 +27,9 @@ urlpatterns = [
     path('auth/register/', views.RegisterView.as_view(), name='auth-register'),
     path('auth/logout/', views.LogoutView.as_view(), name='auth-logout'),
     path('auth/me/', views.MeView.as_view(), name='auth-me'),
+    path('auth/send-verification-code/', views.SendVerificationCodeView.as_view(), name='send-verification-code'),
+    path('auth/verify-email-code/', views.VerifyEmailCodeView.as_view(), name='verify-email-code'),
+    path('auth/register-verify/', views.RegisterWithVerificationView.as_view(), name='register-verify'),
 
     # Customer URLs
     path('customers/', views.CustomerListCreate.as_view(), name='customer-list-create'),
