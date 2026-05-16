@@ -1,6 +1,13 @@
-from rest_framework import generics, permissions
+from rest_framework import generics, permissions, status
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.authtoken.models import Token
 from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription
-from .serializers import CustomerSerializer, ProviderSerializer, ProductSerializer, BatchSerializer, BatchParticipantSerializer, SubscriptionSerializer
+from .serializers import (
+    CustomerSerializer, ProviderSerializer, ProductSerializer,
+    BatchSerializer, BatchParticipantSerializer, SubscriptionSerializer,
+    LoginSerializer, RegisterSerializer, AuthDetailSerializer
+)
 
 
 # --- Customer Views ---
@@ -103,3 +110,71 @@ class SubscriptionDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = SubscriptionSerializer
     lookup_field = 'subscription_id'
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+
+# --- Auth Views ---
+
+class LoginView(APIView):
+    """
+    POST /api/auth/login/
+    Login endpoint. Accepts email and password, returns token and user info.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = LoginSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.validated_data['user']
+            token, created = Token.objects.get_or_create(user=user)
+            return Response({
+                'token': token.key,
+                'user': AuthDetailSerializer(user).data,
+            }, status=status.HTTP_200_OK)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class RegisterView(APIView):
+    """
+    POST /api/auth/register/
+    Register endpoint. Accepts email, username, password, and creates a new customer.
+    Returns token and user info.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = RegisterSerializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            token, created = Token.objects.get_or_create(user=user)
+            return Response({
+                'token': token.key,
+                'user': AuthDetailSerializer(user).data,
+            }, status=status.HTTP_201_CREATED)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class LogoutView(APIView):
+    """
+    POST /api/auth/logout/
+    Logout endpoint. Deletes the user's token.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            request.user.auth_token.delete()
+            return Response({'detail': 'Logged out successfully.'}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class MeView(APIView):
+    """
+    GET /api/auth/me/
+    Get current user info. Requires authentication.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        serializer = AuthDetailSerializer(request.user)
+        return Response(serializer.data, status=status.HTTP_200_OK)

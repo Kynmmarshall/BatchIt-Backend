@@ -20,6 +20,12 @@ urlpatterns = [
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
 
+    # Auth URLs
+    path('auth/login/', views.LoginView.as_view(), name='auth-login'),
+    path('auth/register/', views.RegisterView.as_view(), name='auth-register'),
+    path('auth/logout/', views.LogoutView.as_view(), name='auth-logout'),
+    path('auth/me/', views.MeView.as_view(), name='auth-me'),
+
     # Customer URLs
     path('customers/', views.CustomerListCreate.as_view(), name='customer-list-create'),
     path('customers/<uuid:pk>/', views.CustomerDetail.as_view(), name='customer-detail'),

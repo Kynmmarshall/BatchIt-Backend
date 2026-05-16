@@ -1,4 +1,6 @@
 from rest_framework import serializers
+from rest_framework.authtoken.models import Token
+from django.contrib.auth import authenticate
 from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription
 
 # Existing BatchSerializer
@@ -110,3 +112,76 @@ class SubscriptionSerializer(serializers.ModelSerializer):
         model = Subscription
         fields = '__all__'
         read_only_fields = ('subscription_id', 'subscribed_at')
+
+
+# --- Auth Serializers ---
+
+class LoginSerializer(serializers.Serializer):
+    """
+    Serializer for user login.
+    Accepts email and password, returns token and user info.
+    """
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+
+    def validate(self, data):
+        email = data.get('email')
+        password = data.get('password')
+
+        if not email or not password:
+            raise serializers.ValidationError("Email and password are required.")
+
+        # Authenticate using email as username (Customer uses email as USERNAME_FIELD)
+        user = authenticate(username=email, password=password)
+        if not user:
+            raise serializers.ValidationError("Invalid email or password.")
+
+        data['user'] = user
+        return data
+
+
+class RegisterSerializer(serializers.Serializer):
+    """
+    Serializer for user registration.
+    Creates a new Customer and returns token.
+    """
+    email = serializers.EmailField()
+    username = serializers.CharField(max_length=150)
+    password = serializers.CharField(write_only=True, min_length=6)
+    first_name = serializers.CharField(max_length=150, required=False)
+    last_name = serializers.CharField(max_length=150, required=False)
+
+    def validate(self, data):
+        if Customer.objects.filter(email=data.get('email')).exists():
+            raise serializers.ValidationError("Email already registered.")
+        return data
+
+    def create(self, validated_data):
+        # Create customer with email, username, and password
+        user = Customer.objects.create_user(
+            username=validated_data['username'],
+            email=validated_data['email'],
+            password=validated_data['password'],
+            first_name=validated_data.get('first_name', ''),
+            last_name=validated_data.get('last_name', ''),
+        )
+        return user
+
+
+class AuthDetailSerializer(serializers.ModelSerializer):
+    """
+    Serializer for detailed customer/user info (used in login/register/me responses).
+    """
+    class Meta:
+        model = Customer
+        fields = (
+            'customer_id',
+            'email',
+            'username',
+            'first_name',
+            'last_name',
+            'phone',
+            'profile_photo_url',
+            'created_at',
+        )
+        read_only_fields = '__all__'
