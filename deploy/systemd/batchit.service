@@ -3,10 +3,8 @@ Description=Gunicorn instance to serve BatchIt
 After=network.target
 
 [Service]
-# Replace 'deploy' below with the non-root user you want to run the app as
 User=root
 Group=root
-
 WorkingDirectory=/root/BatchIt-Backend
 Environment="PATH=/root/BatchIt-Backend/.venv/bin"
 ExecStart=/root/BatchIt-Backend/.venv/bin/gunicorn --workers 3 --bind unix:/run/batchit.sock batchit_proj.wsgi:application
