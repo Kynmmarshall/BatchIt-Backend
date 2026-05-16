@@ -184,4 +184,13 @@ class AuthDetailSerializer(serializers.ModelSerializer):
             'profile_photo_url',
             'created_at',
         )
-        read_only_fields = '__all__'
+        read_only_fields = (
+            'customer_id',
+            'email',
+            'username',
+            'first_name',
+            'last_name',
+            'phone',
+            'profile_photo_url',
+            'created_at',
+        )
