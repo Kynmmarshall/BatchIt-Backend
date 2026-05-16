@@ -3,15 +3,12 @@ Description=Gunicorn instance to serve BatchIt
 After=network.target
 
 [Service]
-# Replace 'www-data' with the Linux user that should run the app
+# Replace 'deploy' below with the non-root user you want to run the app as
 User=root
 Group=root
 
-# Replace the WorkingDirectory and PATH values to point to your deployed repo and venv
-WorkingDirectory=/path/to/BatchIt-Backend
+WorkingDirectory=/root/BatchIt-Backend
 Environment="PATH=/root/BatchIt-Backend/.venv/bin"
-
-# Use a unix socket for Nginx reverse-proxy
 ExecStart=/root/BatchIt-Backend/.venv/bin/gunicorn --workers 3 --bind unix:/run/batchit.sock batchit_proj.wsgi:application
 
 Restart=always
