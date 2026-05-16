@@ -4,15 +4,15 @@ After=network.target
 
 [Service]
 # Replace 'www-data' with the Linux user that should run the app
-User=www-data
-Group=www-data
+User=root
+Group=root
 
 # Replace the WorkingDirectory and PATH values to point to your deployed repo and venv
 WorkingDirectory=/path/to/BatchIt-Backend
-Environment="PATH=/path/to/BatchIt-Backend/.venv/bin"
+Environment="PATH=/root/BatchIt-Backend/.venv/bin"
 
 # Use a unix socket for Nginx reverse-proxy
-ExecStart=/path/to/BatchIt-Backend/.venv/bin/gunicorn --workers 3 --bind unix:/run/batchit.sock batchit_proj.wsgi:application
+ExecStart=/root/BatchIt-Backend/.venv/bin/gunicorn --workers 3 --bind unix:/run/batchit.sock batchit_proj.wsgi:application
 
 Restart=always
 RestartSec=5
