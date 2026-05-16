@@ -10,6 +10,22 @@ from .serializers import (
 )
 
 
+class ApiRootView(APIView):
+    """
+    GET /api/
+    Lightweight API root endpoint used for health and discoverability.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def get(self, request):
+        return Response({
+            'name': 'BatchIt API',
+            'status': 'ok',
+            'docs': '/api/swagger/',
+            'version': 'v1',
+        }, status=status.HTTP_200_OK)
+
+
 # --- Customer Views ---
 class CustomerListCreate(generics.ListCreateAPIView):
     """Lists all customers or creates a new customer."""
