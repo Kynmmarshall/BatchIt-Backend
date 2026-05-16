@@ -1,0 +1,9 @@
+asgiref==3.11.1
+Django==6.0.5
+djangorestframework==3.17.1
+python-dotenv==1.2.2
+sqlparse==0.5.5
+tzdata==2026.2
+dj-database-url==2.1.0 # Added for PostgreSQL database configuration
+django-cors-headers==4.4.0 # Added for handling CORS
+drf-yasg==1.21.7 # Added for Swagger/OpenAPI documentation
