@@ -2,11 +2,16 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.authtoken.models import Token
+from rest_framework.exceptions import ValidationError
+from django.db import transaction
+from django.db.models import Sum
 from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription
 from .serializers import (
     CustomerSerializer, ProviderSerializer, ProductSerializer,
     BatchSerializer, BatchParticipantSerializer, SubscriptionSerializer,
-    LoginSerializer, RegisterSerializer, AuthDetailSerializer
+    LoginSerializer, RegisterSerializer, AuthDetailSerializer,
+    OrderSerializer, OrderCreateSerializer, OrderStatusUpdateSerializer,
+    JoinBatchSerializer,
 )
 
 
@@ -91,6 +96,76 @@ class BatchDetail(generics.RetrieveUpdateDestroyAPIView):
     lookup_field = 'batch_id'
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
+
+def _join_batch_for_customer(*, batch, customer, quantity_requested):
+    """
+    Shared join/order logic used by /orders/ and /batches/<id>/join/.
+    Ensures batch is open, capacity is respected, and filled/status are updated.
+    """
+    if batch.status != 'open':
+        raise ValidationError({'detail': 'This batch is not open for joining.'})
+
+    if quantity_requested <= 0:
+        raise ValidationError({'quantity_requested': 'Quantity must be greater than zero.'})
+
+    with transaction.atomic():
+        batch = Batch.objects.select_for_update().get(batch_id=batch.batch_id)
+
+        currently_filled = (
+            BatchParticipant.objects
+            .filter(batch=batch)
+            .aggregate(total=Sum('quantity_requested'))['total']
+            or 0
+        )
+
+        remaining = batch.total_quantity - currently_filled
+        if quantity_requested > remaining:
+            raise ValidationError({
+                'quantity_requested': f'Only {remaining} unit(s) remaining in this batch.'
+            })
+
+        participant, created = BatchParticipant.objects.get_or_create(
+            batch=batch,
+            customer=customer,
+            defaults={'quantity_requested': quantity_requested},
+        )
+
+        if not created:
+            participant.quantity_requested += quantity_requested
+            participant.save(update_fields=['quantity_requested'])
+
+        refreshed_filled = (
+            BatchParticipant.objects
+            .filter(batch=batch)
+            .aggregate(total=Sum('quantity_requested'))['total']
+            or 0
+        )
+        batch.filled_quantity = refreshed_filled
+        batch.status = 'filled' if refreshed_filled >= batch.total_quantity else 'open'
+        batch.save(update_fields=['filled_quantity', 'status'])
+
+    return participant
+
+
+class BatchJoinView(APIView):
+    """
+    POST /api/batches/<id>/join/
+    Join an existing batch.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, batch_id):
+        serializer = JoinBatchSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        batch = generics.get_object_or_404(Batch, batch_id=batch_id)
+        participant = _join_batch_for_customer(
+            batch=batch,
+            customer=request.user,
+            quantity_requested=serializer.validated_data['quantity_requested'],
+        )
+        return Response(OrderSerializer(participant).data, status=status.HTTP_201_CREATED)
+
 # --- BatchParticipant Views ---
 class BatchParticipantListCreate(generics.ListCreateAPIView):
     """Lists all batch participants or creates a new batch participant."""
@@ -126,6 +201,86 @@ class SubscriptionDetail(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = SubscriptionSerializer
     lookup_field = 'subscription_id'
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+
+
+# --- Order Views (backed by BatchParticipant) ---
+
+class OrderListCreate(APIView):
+    """
+    GET /api/orders/
+    POST /api/orders/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        queryset = BatchParticipant.objects.filter(customer=request.user).select_related(
+            'batch', 'batch__product', 'batch__provider'
+        )
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            queryset = queryset.filter(status=status_filter)
+
+        serializer = OrderSerializer(queryset, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        serializer = OrderCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        batch = generics.get_object_or_404(Batch, batch_id=serializer.validated_data['batch_id'])
+        participant = _join_batch_for_customer(
+            batch=batch,
+            customer=request.user,
+            quantity_requested=serializer.validated_data['quantity_requested'],
+        )
+        return Response(OrderSerializer(participant).data, status=status.HTTP_201_CREATED)
+
+
+class OrderDetail(APIView):
+    """
+    GET /api/orders/<id>/
+    PATCH /api/orders/<id>/
+    DELETE /api/orders/<id>/
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_object(self, order_id, user):
+        return generics.get_object_or_404(
+            BatchParticipant.objects.select_related('batch', 'batch__product', 'batch__provider'),
+            participant_id=order_id,
+            customer=user,
+        )
+
+    def get(self, request, order_id):
+        participant = self._get_object(order_id, request.user)
+        return Response(OrderSerializer(participant).data, status=status.HTTP_200_OK)
+
+    def patch(self, request, order_id):
+        participant = self._get_object(order_id, request.user)
+        serializer = OrderStatusUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        participant.status = serializer.validated_data['status']
+        participant.save(update_fields=['status'])
+        return Response(OrderSerializer(participant).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, order_id):
+        participant = self._get_object(order_id, request.user)
+        batch = participant.batch
+        participant.delete()
+
+        refreshed_filled = (
+            BatchParticipant.objects
+            .filter(batch=batch)
+            .aggregate(total=Sum('quantity_requested'))['total']
+            or 0
+        )
+        batch.filled_quantity = refreshed_filled
+        if batch.status == 'filled' and refreshed_filled < batch.total_quantity:
+            batch.status = 'open'
+        batch.save(update_fields=['filled_quantity', 'status'])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # --- Auth Views ---

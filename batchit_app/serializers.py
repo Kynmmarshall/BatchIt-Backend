@@ -104,6 +104,57 @@ class BatchParticipantSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ('participant_id', 'joined_at', 'status') # Status might be updated by system
 
+
+class OrderSerializer(serializers.ModelSerializer):
+    """
+    Frontend-facing order serializer backed by BatchParticipant.
+    """
+    order_id = serializers.UUIDField(source='participant_id', read_only=True)
+    batch_id = serializers.UUIDField(source='batch.batch_id', read_only=True)
+    product_name = serializers.CharField(source='batch.product.name', read_only=True)
+    provider_name = serializers.CharField(source='batch.provider.business_name', read_only=True)
+
+    class Meta:
+        model = BatchParticipant
+        fields = (
+            'order_id',
+            'batch_id',
+            'product_name',
+            'provider_name',
+            'quantity_requested',
+            'status',
+            'joined_at',
+        )
+        read_only_fields = (
+            'order_id',
+            'batch_id',
+            'product_name',
+            'provider_name',
+            'joined_at',
+        )
+
+
+class OrderCreateSerializer(serializers.Serializer):
+    """
+    Input serializer for creating an order (joining a batch).
+    """
+    batch_id = serializers.UUIDField()
+    quantity_requested = serializers.IntegerField(min_value=1)
+
+
+class OrderStatusUpdateSerializer(serializers.Serializer):
+    """
+    Input serializer for updating order status.
+    """
+    status = serializers.ChoiceField(choices=BatchParticipant._meta.get_field('status').choices)
+
+
+class JoinBatchSerializer(serializers.Serializer):
+    """
+    Input serializer for /batches/<id>/join/ endpoint.
+    """
+    quantity_requested = serializers.IntegerField(min_value=1)
+
 class SubscriptionSerializer(serializers.ModelSerializer):
     """
     Serializer for the Subscription model.

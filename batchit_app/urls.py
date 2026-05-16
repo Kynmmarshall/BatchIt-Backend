@@ -43,6 +43,11 @@ urlpatterns = [
     # Batch URLs
     path('batches/', views.BatchListCreate.as_view(), name='batch-list-create'),
     path('batches/<uuid:pk>/', views.BatchDetail.as_view(), name='batch-detail'),
+    path('batches/<uuid:batch_id>/join/', views.BatchJoinView.as_view(), name='batch-join'),
+
+    # Order URLs (backed by BatchParticipant)
+    path('orders/', views.OrderListCreate.as_view(), name='order-list-create'),
+    path('orders/<uuid:order_id>/', views.OrderDetail.as_view(), name='order-detail'),
 
     # BatchParticipant URLs
     path('batch-participants/', views.BatchParticipantListCreate.as_view(), name='batchparticipant-list-create'),
