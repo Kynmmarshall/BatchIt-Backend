@@ -172,20 +172,40 @@ class LoginSerializer(serializers.Serializer):
     Serializer for user login.
     Accepts email and password, returns token and user info.
     """
-    email = serializers.EmailField()
-    password = serializers.CharField(write_only=True)
+    email = serializers.EmailField(error_messages={
+        'invalid': 'Please enter a valid email address.',
+        'required': 'Email is required.',
+        'blank': 'Email cannot be blank.',
+    })
+    password = serializers.CharField(
+        write_only=True,
+        error_messages={
+            'required': 'Password is required.',
+            'blank': 'Password cannot be blank.',
+        }
+    )
+
+    def validate_email(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError('Email cannot be empty.')
+        return value
+
+    def validate_password(self, value):
+        if not value or len(value) < 1:
+            raise serializers.ValidationError('Password is required.')
+        return value
 
     def validate(self, data):
         email = data.get('email')
         password = data.get('password')
 
         if not email or not password:
-            raise serializers.ValidationError("Email and password are required.")
+            raise serializers.ValidationError('Email and password are required.')
 
         # Authenticate using email as username (Customer uses email as USERNAME_FIELD)
         user = authenticate(username=email, password=password)
         if not user:
-            raise serializers.ValidationError("Invalid email or password.")
+            raise serializers.ValidationError('Invalid email or password. Please try again.')
 
         data['user'] = user
         return data
@@ -196,15 +216,56 @@ class RegisterSerializer(serializers.Serializer):
     Serializer for user registration.
     Creates a new Customer and returns token.
     """
-    email = serializers.EmailField()
-    username = serializers.CharField(max_length=150)
-    password = serializers.CharField(write_only=True, min_length=6)
-    first_name = serializers.CharField(max_length=150, required=False)
-    last_name = serializers.CharField(max_length=150, required=False)
+    email = serializers.EmailField(error_messages={
+        'invalid': 'Please enter a valid email address.',
+        'required': 'Email is required.',
+        'blank': 'Email cannot be blank.',
+    })
+    username = serializers.CharField(
+        max_length=150,
+        error_messages={
+            'required': 'Username is required.',
+            'blank': 'Username cannot be blank.',
+            'max_length': 'Username cannot exceed 150 characters.',
+        }
+    )
+    password = serializers.CharField(
+        write_only=True,
+        min_length=6,
+        error_messages={
+            'required': 'Password is required.',
+            'blank': 'Password cannot be blank.',
+            'min_length': 'Password must be at least 6 characters long.',
+        }
+    )
+    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+
+    def validate_email(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError('Email cannot be empty.')
+        if Customer.objects.filter(email=value).exists():
+            raise serializers.ValidationError('This email is already registered. Please try logging in.')
+        return value
+
+    def validate_username(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError('Username cannot be empty.')
+        if Customer.objects.filter(username=value).exists():
+            raise serializers.ValidationError('This username is already taken. Please choose another.')
+        return value
+
+    def validate_password(self, value):
+        if not value or len(value) < 6:
+            raise serializers.ValidationError('Password must be at least 6 characters long.')
+        if value.isdigit():
+            raise serializers.ValidationError('Password cannot be only numbers.')
+        return value
 
     def validate(self, data):
-        if Customer.objects.filter(email=data.get('email')).exists():
-            raise serializers.ValidationError("Email already registered.")
+        email = data.get('email')
+        if Customer.objects.filter(email=email).exists():
+            raise serializers.ValidationError({'email': 'This email is already registered.'})
         return data
 
     def create(self, validated_data):
@@ -251,7 +312,11 @@ class SendVerificationCodeSerializer(serializers.Serializer):
     """
     Serializer for requesting an email verification code.
     """
-    email = serializers.EmailField()
+    email = serializers.EmailField(error_messages={
+        'invalid': 'Please enter a valid email address.',
+        'required': 'Email is required.',
+        'blank': 'Email cannot be blank.',
+    })
 
 
 class VerifyEmailCodeSerializer(serializers.Serializer):
@@ -259,8 +324,19 @@ class VerifyEmailCodeSerializer(serializers.Serializer):
     Serializer for verifying an email code.
     Used during registration to verify email before creating account.
     """
-    email = serializers.EmailField()
-    code = serializers.CharField(max_length=6, min_length=6)
+    email = serializers.EmailField(error_messages={
+        'invalid': 'Please enter a valid email address.',
+        'required': 'Email is required.',
+    })
+    code = serializers.CharField(
+        max_length=6,
+        min_length=6,
+        error_messages={
+            'required': 'Verification code is required.',
+            'max_length': 'Verification code must be 6 digits.',
+            'min_length': 'Verification code must be 6 digits.',
+        }
+    )
 
 
 class RegisterWithVerificationSerializer(serializers.Serializer):
@@ -268,28 +344,69 @@ class RegisterWithVerificationSerializer(serializers.Serializer):
     Serializer for registration with email verification.
     Verifies the email code, then creates the user account.
     """
-    email = serializers.EmailField()
-    code = serializers.CharField(max_length=6, min_length=6)
-    username = serializers.CharField(max_length=150)
-    password = serializers.CharField(write_only=True, min_length=6)
-    first_name = serializers.CharField(max_length=150, required=False)
-    last_name = serializers.CharField(max_length=150, required=False)
+    email = serializers.EmailField(error_messages={
+        'invalid': 'Please enter a valid email address.',
+        'required': 'Email is required.',
+    })
+    code = serializers.CharField(
+        max_length=6,
+        min_length=6,
+        error_messages={
+            'required': 'Verification code is required.',
+            'max_length': 'Verification code must be 6 digits.',
+            'min_length': 'Verification code must be 6 digits.',
+        }
+    )
+    username = serializers.CharField(
+        max_length=150,
+        error_messages={
+            'required': 'Username is required.',
+            'max_length': 'Username cannot exceed 150 characters.',
+        }
+    )
+    password = serializers.CharField(
+        write_only=True,
+        min_length=6,
+        error_messages={
+            'required': 'Password is required.',
+            'min_length': 'Password must be at least 6 characters long.',
+        }
+    )
+    first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+
+    def validate_code(self, value):
+        if not value.isdigit():
+            raise serializers.ValidationError('Verification code must contain only digits.')
+        return value
+
+    def validate_password(self, value):
+        if len(value) < 6:
+            raise serializers.ValidationError('Password must be at least 6 characters long.')
+        if value.isdigit():
+            raise serializers.ValidationError('Password cannot be only numbers.')
+        return value
+
+    def validate_username(self, value):
+        if Customer.objects.filter(username=value).exists():
+            raise serializers.ValidationError('This username is already taken.')
+        return value
 
     def validate(self, data):
-        # Verify email code is valid
         email = data.get('email')
         code = data.get('code')
 
+        # Verify email code is valid
         try:
             verification = EmailVerificationCode.objects.get(email=email, code=code)
             if not verification.is_valid():
-                raise serializers.ValidationError({'code': 'Verification code has expired or already used.'})
+                raise serializers.ValidationError({'code': 'Verification code has expired. Please request a new one.'})
         except EmailVerificationCode.DoesNotExist:
-            raise serializers.ValidationError({'code': 'Invalid or expired verification code.'})
+            raise serializers.ValidationError({'code': 'Invalid verification code. Please check and try again.'})
 
         # Check email not already registered
         if Customer.objects.filter(email=email).exists():
-            raise serializers.ValidationError({'email': 'Email already registered.'})
+            raise serializers.ValidationError({'email': 'This email is already registered.'})
 
         return data
 
