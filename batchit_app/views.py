@@ -301,7 +301,11 @@ class SendVerificationCodeView(APIView):
 
     def post(self, request):
         serializer = SendVerificationCodeSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        try:
+            serializer.is_valid(raise_exception=True)
+        except ValidationError as ve:
+            logger.warning('Validation error in send-verification-code: %s; request: %s', ve.detail if hasattr(ve, 'detail') else str(ve), request.data)
+            return Response(ve.detail if hasattr(ve, 'detail') else {'detail': str(ve)}, status=status.HTTP_400_BAD_REQUEST)
 
         email = serializer.validated_data['email']
 

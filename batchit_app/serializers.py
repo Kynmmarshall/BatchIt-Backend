@@ -323,11 +323,7 @@ class SendVerificationCodeSerializer(serializers.Serializer):
         'required': 'Email is required.',
         'blank': 'Email cannot be blank.',
     })
-    
-    def validate_email(self, value):
-        if not re.match(r'^[A-Za-z0-9][A-Za-z0-9._%+\-]*@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$', value):
-            raise serializers.ValidationError('Please enter a valid email address.')
-        return value
+    # Rely on DRF's EmailField validation to avoid over-restrictive custom regexes.
 
 
 class VerifyEmailCodeSerializer(serializers.Serializer):
