@@ -30,6 +30,7 @@ urlpatterns = [
     path('auth/send-verification-code/', views.SendVerificationCodeView.as_view(), name='send-verification-code'),
     path('auth/verify-email-code/', views.VerifyEmailCodeView.as_view(), name='verify-email-code'),
     path('auth/register-verify/', views.RegisterWithVerificationView.as_view(), name='register-verify'),
+    path('auth/google-login/', views.GoogleLoginView.as_view(), name='auth-google-login'),
 
     # Customer URLs
     path('customers/', views.CustomerListCreate.as_view(), name='customer-list-create'),

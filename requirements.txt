@@ -10,3 +10,4 @@ django-cors-headers==4.4.0 # Added for handling CORS
 drf-yasg==1.21.7 # Added for Swagger/OpenAPI documentation
 psycopg[binary]>=3.1.0 # PostgreSQL driver for Django 6.0+
 gunicorn>=20.1.0 # WSGI HTTP server for UNIX
+google-auth==2.30.0 # Google ID token verification

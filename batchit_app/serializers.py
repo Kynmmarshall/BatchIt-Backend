@@ -441,3 +441,21 @@ class RegisterWithVerificationSerializer(serializers.Serializer):
             last_name=validated_data.get('last_name', ''),
         )
         return user
+
+
+class GoogleLoginSerializer(serializers.Serializer):
+    """
+    Serializer for Google OAuth login/registration.
+    Accepts Google ID token, validates it, and creates/retrieves user account.
+    """
+    id_token = serializers.CharField(
+        error_messages={
+            'required': 'ID token is required.',
+            'blank': 'ID token cannot be blank.',
+        }
+    )
+
+    def validate_id_token(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError('ID token cannot be empty.')
+        return value.strip()

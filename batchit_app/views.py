@@ -8,6 +8,8 @@ from django.db.models import Sum
 from django.core.mail import send_mail
 from django.conf import settings
 import logging
+from google.auth.transport import requests
+from google.oauth2 import id_token
 from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription, EmailVerificationCode
 from .serializers import (
     CustomerSerializer, ProviderSerializer, ProductSerializer,
@@ -15,7 +17,7 @@ from .serializers import (
     LoginSerializer, RegisterSerializer, AuthDetailSerializer,
     OrderSerializer, OrderCreateSerializer, OrderStatusUpdateSerializer,
     JoinBatchSerializer, SendVerificationCodeSerializer, VerifyEmailCodeSerializer,
-    RegisterWithVerificationSerializer,
+    RegisterWithVerificationSerializer, GoogleLoginSerializer,
 )
 
 
@@ -516,3 +518,85 @@ class MeView(APIView):
     def get(self, request):
         serializer = AuthDetailSerializer(request.user)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class GoogleLoginView(APIView):
+    """
+    POST /api/auth/google-login/
+    Login or register with Google OAuth.
+    Accepts Google ID token, validates it, creates/authenticates user, returns auth token.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        serializer = GoogleLoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+
+        id_token_str = serializer.validated_data['id_token']
+
+        try:
+            # Verify the ID token using Google's public keys
+            # Note: This uses the new google-auth library API
+            request_obj = requests.Request()
+            # Get Google's current public keys
+            from google.oauth2 import id_token as id_token_module
+            
+            # Verify the token (this will raise an exception if invalid)
+            id_info = id_token.verify_oauth2_token(
+                id_token_str,
+                request_obj,
+                clock_skew_in_seconds=10,
+            )
+
+            # Extract user info from token
+            email = id_info.get('email')
+            first_name = id_info.get('given_name', '')
+            last_name = id_info.get('family_name', '')
+            google_id = id_info.get('sub')  # Subject (unique Google ID)
+
+            if not email:
+                return Response(
+                    {'detail': 'Email not found in Google token.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # Create or get user account
+            user, created = Customer.objects.get_or_create(
+                email=email,
+                defaults={
+                    'username': email.split('@')[0] + '_' + google_id[:8],  # Create unique username
+                    'first_name': first_name,
+                    'last_name': last_name,
+                }
+            )
+
+            # Set a random password for Google-authenticated users (they don't use password login)
+            if created:
+                user.set_unusable_password()
+                user.save()
+                logger.info('Created new user from Google login: %s', email)
+            else:
+                logger.info('Authenticated existing user via Google: %s', email)
+
+            # Generate or get auth token
+            token, _ = Token.objects.get_or_create(user=user)
+
+            return Response({
+                'token': token.key,
+                'user': AuthDetailSerializer(user).data,
+            }, status=status.HTTP_200_OK)
+
+        except ValueError as e:
+            # Token validation failed
+            logger.warning('Invalid Google ID token: %s', str(e))
+            return Response(
+                {'detail': f'Invalid Google token: {str(e)}'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        except Exception as e:
+            # Other errors
+            logger.exception('Google login error: %s', str(e))
+            return Response(
+                {'detail': f'Google login failed: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
