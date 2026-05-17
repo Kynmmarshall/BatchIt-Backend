@@ -7,6 +7,7 @@ from django.db import transaction
 from django.db.models import Sum
 from django.core.mail import send_mail
 from django.conf import settings
+import logging
 from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription, EmailVerificationCode
 from .serializers import (
     CustomerSerializer, ProviderSerializer, ProductSerializer,
@@ -16,6 +17,9 @@ from .serializers import (
     JoinBatchSerializer, SendVerificationCodeSerializer, VerifyEmailCodeSerializer,
     RegisterWithVerificationSerializer,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class ApiRootView(APIView):
@@ -315,19 +319,68 @@ class SendVerificationCodeView(APIView):
             code=code,
         )
 
+        # Validate SMTP configuration before attempting to send.
+        backend = (settings.EMAIL_BACKEND or '').strip()
+        host = (settings.EMAIL_HOST or '').strip()
+        host_user = (settings.EMAIL_HOST_USER or '').strip()
+        host_password = (settings.EMAIL_HOST_PASSWORD or '').strip()
+        configured_from = (settings.DEFAULT_FROM_EMAIL or '').strip()
+        from_email = configured_from or host_user
+
+        if backend != 'django.core.mail.backends.smtp.EmailBackend':
+            verification.delete()
+            return Response(
+                {
+                    'detail': (
+                        'Email service is not configured for SMTP. '
+                        'Set EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend in your .env and restart service.'
+                    )
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        missing = []
+        if not host:
+            missing.append('EMAIL_HOST')
+        if not host_user:
+            missing.append('EMAIL_HOST_USER')
+        if not host_password:
+            missing.append('EMAIL_HOST_PASSWORD')
+        if not from_email:
+            missing.append('DEFAULT_FROM_EMAIL or EMAIL_HOST_USER')
+
+        if missing:
+            verification.delete()
+            return Response(
+                {
+                    'detail': (
+                        'Email service is missing required settings: '
+                        + ', '.join(missing)
+                        + '. Update .env and restart service.'
+                    )
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
         # Send email with verification code
         try:
             send_mail(
                 subject='BatchIt - Email Verification Code',
                 message=f'Your verification code is: {code}\n\nThis code will expire in 15 minutes.',
-                from_email=settings.DEFAULT_FROM_EMAIL,
+                from_email=from_email,
                 recipient_list=[email],
                 fail_silently=False,
             )
         except Exception as e:
+            logger.exception('Failed to send verification email to %s', email)
             verification.delete()
             return Response(
-                {'detail': f'Failed to send verification email: {str(e)}'},
+                {
+                    'detail': f'Failed to send verification email: {e.__class__.__name__}: {str(e)}',
+                    'email_backend': backend,
+                    'email_host': host,
+                    'from_email': from_email,
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
