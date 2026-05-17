@@ -2,6 +2,7 @@ from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import authenticate
 from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription, EmailVerificationCode
+import re
 
 # Existing BatchSerializer
 class BatchSerializer(serializers.ModelSerializer):
@@ -188,6 +189,9 @@ class LoginSerializer(serializers.Serializer):
     def validate_email(self, value):
         if not value or not value.strip():
             raise serializers.ValidationError('Email cannot be empty.')
+        # Prevent local-part starting with invalid characters like '-'
+        if not re.match(r'^[A-Za-z0-9][A-Za-z0-9._%+\-]*@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$', value):
+            raise serializers.ValidationError('Please enter a valid email address.')
         return value
 
     def validate_password(self, value):
@@ -231,11 +235,11 @@ class RegisterSerializer(serializers.Serializer):
     )
     password = serializers.CharField(
         write_only=True,
-        min_length=6,
+        min_length=8,
         error_messages={
             'required': 'Password is required.',
             'blank': 'Password cannot be blank.',
-            'min_length': 'Password must be at least 6 characters long.',
+            'min_length': 'Password must be at least 8 characters long.',
         }
     )
     first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
@@ -244,6 +248,8 @@ class RegisterSerializer(serializers.Serializer):
     def validate_email(self, value):
         if not value or not value.strip():
             raise serializers.ValidationError('Email cannot be empty.')
+        if not re.match(r'^[A-Za-z0-9][A-Za-z0-9._%+\-]*@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$', value):
+            raise serializers.ValidationError('Please enter a valid email address.')
         if Customer.objects.filter(email=value).exists():
             raise serializers.ValidationError('This email is already registered. Please try logging in.')
         return value
@@ -256,8 +262,8 @@ class RegisterSerializer(serializers.Serializer):
         return value
 
     def validate_password(self, value):
-        if not value or len(value) < 6:
-            raise serializers.ValidationError('Password must be at least 6 characters long.')
+        if not value or len(value) < 8:
+            raise serializers.ValidationError('Password must be at least 8 characters long.')
         if value.isdigit():
             raise serializers.ValidationError('Password cannot be only numbers.')
         return value
@@ -317,6 +323,11 @@ class SendVerificationCodeSerializer(serializers.Serializer):
         'required': 'Email is required.',
         'blank': 'Email cannot be blank.',
     })
+    
+    def validate_email(self, value):
+        if not re.match(r'^[A-Za-z0-9][A-Za-z0-9._%+\-]*@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$', value):
+            raise serializers.ValidationError('Please enter a valid email address.')
+        return value
 
 
 class VerifyEmailCodeSerializer(serializers.Serializer):
@@ -366,10 +377,10 @@ class RegisterWithVerificationSerializer(serializers.Serializer):
     )
     password = serializers.CharField(
         write_only=True,
-        min_length=6,
+        min_length=8,
         error_messages={
             'required': 'Password is required.',
-            'min_length': 'Password must be at least 6 characters long.',
+            'min_length': 'Password must be at least 8 characters long.',
         }
     )
     first_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
@@ -381,8 +392,8 @@ class RegisterWithVerificationSerializer(serializers.Serializer):
         return value
 
     def validate_password(self, value):
-        if len(value) < 6:
-            raise serializers.ValidationError('Password must be at least 6 characters long.')
+        if len(value) < 8:
+            raise serializers.ValidationError('Password must be at least 8 characters long.')
         if value.isdigit():
             raise serializers.ValidationError('Password cannot be only numbers.')
         return value
