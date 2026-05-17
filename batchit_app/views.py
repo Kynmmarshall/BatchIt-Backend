@@ -462,10 +462,12 @@ class LoginView(APIView):
         if serializer.is_valid():
             user = serializer.validated_data['user']
             token, created = Token.objects.get_or_create(user=user)
+            logger.info('Successful login for user: %s', user.email)
             return Response({
                 'token': token.key,
                 'user': AuthDetailSerializer(user).data,
             }, status=status.HTTP_200_OK)
+        logger.warning('Failed login attempt: %s; request email: %s', serializer.errors, request.data.get('email', 'N/A'))
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 

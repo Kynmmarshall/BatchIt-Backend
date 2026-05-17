@@ -206,10 +206,16 @@ class LoginSerializer(serializers.Serializer):
         if not email or not password:
             raise serializers.ValidationError('Email and password are required.')
 
+        # Check if account exists first
+        try:
+            customer = Customer.objects.get(email=email)
+        except Customer.DoesNotExist:
+            raise serializers.ValidationError({'email': 'No account found with this email address.'})
+
         # Authenticate using email as username (Customer uses email as USERNAME_FIELD)
         user = authenticate(username=email, password=password)
         if not user:
-            raise serializers.ValidationError('Invalid email or password. Please try again.')
+            raise serializers.ValidationError({'password': 'Incorrect password. Please try again.'})
 
         data['user'] = user
         return data
