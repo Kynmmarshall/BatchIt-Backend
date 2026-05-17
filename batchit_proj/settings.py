@@ -111,6 +111,7 @@ USE_TZ = True
 
 # Static files
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # CORS Headers Settings
 CORS_ALLOW_ALL_ORIGINS = True
