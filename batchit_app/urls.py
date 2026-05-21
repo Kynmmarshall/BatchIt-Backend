@@ -27,6 +27,8 @@ urlpatterns = [
     path('auth/register/', views.RegisterView.as_view(), name='auth-register'),
     path('auth/logout/', views.LogoutView.as_view(), name='auth-logout'),
     path('auth/me/', views.MeView.as_view(), name='auth-me'),
+    path('auth/refresh/', views.RefreshTokenView.as_view(), name='auth-refresh'),
+    path('auth/update-profile/', views.UpdateProfileView.as_view(), name='auth-update-profile'),
     path('auth/send-verification-code/', views.SendVerificationCodeView.as_view(), name='send-verification-code'),
     path('auth/verify-email-code/', views.VerifyEmailCodeView.as_view(), name='verify-email-code'),
     path('auth/register-verify/', views.RegisterWithVerificationView.as_view(), name='register-verify'),
@@ -34,19 +36,21 @@ urlpatterns = [
 
     # Customer URLs
     path('customers/', views.CustomerListCreate.as_view(), name='customer-list-create'),
-    path('customers/<uuid:pk>/', views.CustomerDetail.as_view(), name='customer-detail'),
+    path('customers/<uuid:customer_id>/', views.CustomerDetail.as_view(), name='customer-detail'),
 
-    # Provider URLs
+    # Provider URLs — my-profile must come before the detail pattern
     path('providers/', views.ProviderListCreate.as_view(), name='provider-list-create'),
-    path('providers/<uuid:pk>/', views.ProviderDetail.as_view(), name='provider-detail'),
+    path('providers/my-profile/', views.ProviderMyProfileView.as_view(), name='provider-my-profile'),
+    path('providers/register/', views.ProviderRegisterView.as_view(), name='provider-register'),
+    path('providers/<uuid:provider_id>/', views.ProviderDetail.as_view(), name='provider-detail'),
 
     # Product URLs
     path('products/', views.ProductListCreate.as_view(), name='product-list-create'),
-    path('products/<uuid:pk>/', views.ProductDetail.as_view(), name='product-detail'),
+    path('products/<uuid:product_id>/', views.ProductDetail.as_view(), name='product-detail'),
 
     # Batch URLs
     path('batches/', views.BatchListCreate.as_view(), name='batch-list-create'),
-    path('batches/<uuid:pk>/', views.BatchDetail.as_view(), name='batch-detail'),
+    path('batches/<uuid:batch_id>/', views.BatchDetail.as_view(), name='batch-detail'),
     path('batches/<uuid:batch_id>/join/', views.BatchJoinView.as_view(), name='batch-join'),
 
     # Order URLs (backed by BatchParticipant)
@@ -55,9 +59,9 @@ urlpatterns = [
 
     # BatchParticipant URLs
     path('batch-participants/', views.BatchParticipantListCreate.as_view(), name='batchparticipant-list-create'),
-    path('batch-participants/<uuid:pk>/', views.BatchParticipantDetail.as_view(), name='batchparticipant-detail'),
+    path('batch-participants/<uuid:participant_id>/', views.BatchParticipantDetail.as_view(), name='batchparticipant-detail'),
 
     # Subscription URLs
     path('subscriptions/', views.SubscriptionListCreate.as_view(), name='subscription-list-create'),
-    path('subscriptions/<uuid:pk>/', views.SubscriptionDetail.as_view(), name='subscription-detail'),
+    path('subscriptions/<uuid:subscription_id>/', views.SubscriptionDetail.as_view(), name='subscription-detail'),
 ]

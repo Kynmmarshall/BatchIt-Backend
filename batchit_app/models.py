@@ -39,8 +39,23 @@ class Provider(models.Model):
     rating = models.FloatField(blank=True, null=True) # Average rating (float)
     subscriber_count = models.IntegerField(default=0)
     verified = models.BooleanField(default=False)
+    owner_name = models.CharField(max_length=255, blank=True, default='')
+    owner_email = models.EmailField(blank=True, default='')
+    phone = models.CharField(max_length=20, blank=True, default='')
+    address = models.CharField(max_length=500, blank=True, default='')
+    registration_number = models.CharField(max_length=100, blank=True, default='')
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=[('pending', 'Pending'), ('verified', 'Verified'), ('rejected', 'Rejected')],
+        default='pending',
+    )
     created_at = models.DateTimeField(auto_now_add=True)
-    # Subscriptions will be managed via a ManyToManyField on Customer or a separate model if more complex
+
+    @property
+    def is_verified(self):
+        return self.status == 'verified'
 
     def __str__(self):
         return self.business_name
@@ -84,14 +99,17 @@ class Batch(models.Model):
         ('expired', 'Expired'),
     ]
     batch_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='batches')
-    provider = models.ForeignKey(Provider, on_delete=models.CASCADE, related_name='batches')
+    product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='batches')
+    provider = models.ForeignKey(Provider, on_delete=models.SET_NULL, null=True, blank=True, related_name='batches')
     creator = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='created_batches')
-    total_quantity = models.PositiveIntegerField() # Full pack size (target quantity)
-    filled_quantity = models.PositiveIntegerField(default=0) # How many units have been claimed
+    product_name = models.CharField(max_length=255, blank=True, default='')
+    total_quantity = models.FloatField(default=0)
+    filled_quantity = models.FloatField(default=0)
+    location_name = models.CharField(max_length=255, blank=True, default='')
+    image_url = models.URLField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
-    expires_at = models.DateTimeField(blank=True, null=True) # Optional deadline for the batch
-    notes = models.TextField(blank=True, null=True) # Optional message from creator
+    expires_at = models.DateTimeField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

@@ -1,3 +1,4 @@
+import os
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -12,8 +13,9 @@ from google.auth.transport import requests
 from google.oauth2 import id_token
 from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription, EmailVerificationCode
 from .serializers import (
-    CustomerSerializer, ProviderSerializer, ProductSerializer,
-    BatchSerializer, BatchParticipantSerializer, SubscriptionSerializer,
+    CustomerSerializer, ProviderSerializer, ProviderRegisterSerializer,
+    ProductSerializer, BatchSerializer, BatchCreateSerializer,
+    BatchParticipantSerializer, SubscriptionSerializer,
     LoginSerializer, RegisterSerializer, AuthDetailSerializer,
     OrderSerializer, OrderCreateSerializer, OrderStatusUpdateSerializer,
     JoinBatchSerializer, SendVerificationCodeSerializer, VerifyEmailCodeSerializer,
@@ -88,15 +90,66 @@ class ProductDetail(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
 # --- Batch Views ---
-class BatchListCreate(generics.ListCreateAPIView):
-    """Lists all batches or creates a new batch."""
-    queryset = Batch.objects.all()
-    serializer_class = BatchSerializer
+class BatchListCreate(APIView):
+    """
+    GET /api/batches/  — list open batches (optionally filtered by status or location)
+    POST /api/batches/ — create a new batch
+    """
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
-    def perform_create(self, serializer):
-        # Set the creator to the currently logged-in user
-        serializer.save(creator=self.request.user)
+    def get(self, request):
+        qs = Batch.objects.select_related('provider').all()
+        status_filter = request.query_params.get('status')
+        location_filter = request.query_params.get('location')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        else:
+            qs = qs.filter(status='open')
+        if location_filter:
+            qs = qs.filter(location_name__icontains=location_filter)
+        serializer = BatchSerializer(qs, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request):
+        serializer = BatchCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        provider = None
+        provider_id = data.get('provider_id')
+        if provider_id:
+            provider = generics.get_object_or_404(Provider, provider_id=provider_id)
+
+        # Find or create a Product under this provider for the given name
+        product = None
+        if provider:
+            existing = Product.objects.filter(
+                provider=provider,
+                name__iexact=data['product_name'],
+            ).first()
+            if existing:
+                product = existing
+            else:
+                product = Product.objects.create(
+                    provider=provider,
+                    name=data['product_name'],
+                    pack_size=1,
+                    pack_price=0,
+                )
+
+        batch = Batch.objects.create(
+            creator=request.user,
+            product=product,
+            provider=provider,
+            product_name=data['product_name'],
+            total_quantity=data['bulk_size_kg'],
+            filled_quantity=0,
+            location_name=data.get('location_name', ''),
+            notes=data.get('notes', ''),
+            image_url=data.get('image_url'),
+            expires_at=data.get('expires_at'),
+        )
+        return Response(BatchSerializer(batch).data, status=status.HTTP_201_CREATED)
 
 class BatchDetail(generics.RetrieveUpdateDestroyAPIView):
     """Retrieves, updates, or deletes a specific batch."""
@@ -106,16 +159,13 @@ class BatchDetail(generics.RetrieveUpdateDestroyAPIView):
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
 
 
-def _join_batch_for_customer(*, batch, customer, quantity_requested):
+def _join_batch_for_customer(*, batch, customer, quantity_kg):
     """
     Shared join/order logic used by /orders/ and /batches/<id>/join/.
-    Ensures batch is open, capacity is respected, and filled/status are updated.
+    Ensures batch is open, capacity is respected, and filled/status are updated atomically.
     """
     if batch.status != 'open':
         raise ValidationError({'detail': 'This batch is not open for joining.'})
-
-    if quantity_requested <= 0:
-        raise ValidationError({'quantity_requested': 'Quantity must be greater than zero.'})
 
     with transaction.atomic():
         batch = Batch.objects.select_for_update().get(batch_id=batch.batch_id)
@@ -128,20 +178,22 @@ def _join_batch_for_customer(*, batch, customer, quantity_requested):
         )
 
         remaining = batch.total_quantity - currently_filled
-        if quantity_requested > remaining:
+        if quantity_kg > remaining:
             raise ValidationError({
-                'quantity_requested': f'Only {remaining} unit(s) remaining in this batch.'
+                'quantity_kg': f'Only {remaining} kg remaining in this batch.'
             })
 
-        participant, created = BatchParticipant.objects.get_or_create(
-            batch=batch,
-            customer=customer,
-            defaults={'quantity_requested': quantity_requested},
-        )
-
-        if not created:
-            participant.quantity_requested += quantity_requested
-            participant.save(update_fields=['quantity_requested'])
+        existing = BatchParticipant.objects.filter(batch=batch, customer=customer).first()
+        if existing:
+            existing.quantity_requested += quantity_kg
+            existing.save(update_fields=['quantity_requested'])
+            participant = existing
+        else:
+            participant = BatchParticipant.objects.create(
+                batch=batch,
+                customer=customer,
+                quantity_requested=quantity_kg,
+            )
 
         refreshed_filled = (
             BatchParticipant.objects
@@ -171,7 +223,7 @@ class BatchJoinView(APIView):
         participant = _join_batch_for_customer(
             batch=batch,
             customer=request.user,
-            quantity_requested=serializer.validated_data['quantity_requested'],
+            quantity_kg=serializer.validated_data['quantity_kg'],
         )
         return Response(OrderSerializer(participant).data, status=status.HTTP_201_CREATED)
 
@@ -240,7 +292,7 @@ class OrderListCreate(APIView):
         participant = _join_batch_for_customer(
             batch=batch,
             customer=request.user,
-            quantity_requested=serializer.validated_data['quantity_requested'],
+            quantity_kg=serializer.validated_data['quantity_kg'],
         )
         return Response(OrderSerializer(participant).data, status=status.HTTP_201_CREATED)
 
@@ -600,3 +652,123 @@ class GoogleLoginView(APIView):
                 {'detail': f'Google login failed: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+class RefreshTokenView(APIView):
+    """
+    POST /api/auth/refresh/
+    Refreshes the auth token by deleting the old one and issuing a new one.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            request.user.auth_token.delete()
+        except Exception:
+            pass
+        token = Token.objects.create(user=request.user)
+        return Response({'token': token.key}, status=status.HTTP_200_OK)
+
+
+class UpdateProfileView(APIView):
+    """
+    PATCH /api/auth/update-profile/
+    Updates the authenticated user's first_name, last_name, and optionally profile_photo.
+    Accepts multipart/form-data when a photo file is included.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request):
+        user = request.user
+        first_name = request.data.get('first_name', user.first_name)
+        last_name = request.data.get('last_name', user.last_name)
+
+        user.first_name = first_name
+        user.last_name = last_name
+
+        photo = request.FILES.get('photo')
+        if photo:
+            upload_dir = os.path.join(settings.MEDIA_ROOT, 'profile_photos')
+            os.makedirs(upload_dir, exist_ok=True)
+            ext = os.path.splitext(photo.name)[1]
+            filename = f'{user.customer_id}{ext}'
+            filepath = os.path.join(upload_dir, filename)
+            with open(filepath, 'wb+') as f:
+                for chunk in photo.chunks():
+                    f.write(chunk)
+            user.profile_photo_url = request.build_absolute_uri(
+                settings.MEDIA_URL + f'profile_photos/{filename}'
+            )
+
+        user.save(update_fields=['first_name', 'last_name', 'profile_photo_url'])
+        return Response(AuthDetailSerializer(user).data, status=status.HTTP_200_OK)
+
+
+class ProviderMyProfileView(APIView):
+    """
+    GET /api/providers/my-profile/
+    Returns the provider profile owned by the authenticated user (matched by owner_email).
+    Returns 404 if the user hasn't registered as a provider yet.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        provider = Provider.objects.filter(owner_email=request.user.email).first()
+        if not provider:
+            return Response({'detail': 'No provider profile found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ProviderSerializer(provider).data, status=status.HTTP_200_OK)
+
+
+class ProviderRegisterView(APIView):
+    """
+    POST /api/providers/register/
+    Creates a new provider profile for the authenticated user.
+    Accepts multipart/form-data so a logo image can be uploaded.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        # Prevent duplicate provider registration
+        if Provider.objects.filter(owner_email=request.user.email).exists():
+            return Response(
+                {'detail': 'You have already registered as a provider.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = ProviderRegisterSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        logo_url = None
+        logo = request.FILES.get('logo')
+        if logo:
+            upload_dir = os.path.join(settings.MEDIA_ROOT, 'provider_logos')
+            os.makedirs(upload_dir, exist_ok=True)
+            ext = os.path.splitext(logo.name)[1]
+            import uuid as _uuid
+            filename = f'{_uuid.uuid4()}{ext}'
+            filepath = os.path.join(upload_dir, filename)
+            with open(filepath, 'wb+') as f:
+                for chunk in logo.chunks():
+                    f.write(chunk)
+            logo_url = request.build_absolute_uri(
+                settings.MEDIA_URL + f'provider_logos/{filename}'
+            )
+
+        provider = Provider.objects.create(
+            business_name=data['business_name'],
+            description=data.get('description', ''),
+            category=data.get('category', ''),
+            contact_email=data.get('contact_email', request.user.email),
+            owner_name=data.get('owner_name', ''),
+            owner_email=request.user.email,
+            phone=data.get('phone', ''),
+            address=data.get('address', ''),
+            registration_number=data.get('registration_number', ''),
+            latitude=data.get('latitude'),
+            longitude=data.get('longitude'),
+            location=data.get('location', ''),
+            logo_url=logo_url,
+            status='pending',
+        )
+        return Response(ProviderSerializer(provider).data, status=status.HTTP_201_CREATED)

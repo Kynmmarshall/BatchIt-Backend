@@ -4,35 +4,48 @@ from django.contrib.auth import authenticate
 from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription, EmailVerificationCode
 import re
 
-# Existing BatchSerializer
 class BatchSerializer(serializers.ModelSerializer):
-    remaining_quantity = serializers.ReadOnlyField()
-    is_full = serializers.ReadOnlyField()
+    """Frontend-facing batch serializer with renamed fields."""
+    id = serializers.UUIDField(source='batch_id', read_only=True)
+    bulk_size_kg = serializers.FloatField(source='total_quantity', read_only=True)
+    current_quantity_kg = serializers.FloatField(source='filled_quantity', read_only=True)
+    hub_name = serializers.SerializerMethodField()
+    provider_id = serializers.SerializerMethodField()
+
+    def get_hub_name(self, obj):
+        return obj.provider.business_name if obj.provider else ''
+
+    def get_provider_id(self, obj):
+        return str(obj.provider.provider_id) if obj.provider else None
 
     class Meta:
         model = Batch
         fields = (
-            'batch_id',
-            'product',
-            'provider',
-            'creator',
-            'total_quantity',
-            'filled_quantity',
-            'remaining_quantity',
-            'is_full',
+            'id',
+            'product_name',
+            'bulk_size_kg',
+            'current_quantity_kg',
+            'location_name',
+            'hub_name',
+            'provider_id',
             'status',
             'expires_at',
-            'created_at',
             'notes',
-        )
-        read_only_fields = (
-            'batch_id',
-            'filled_quantity',
-            'status',
+            'image_url',
             'created_at',
-            'remaining_quantity',
-            'is_full',
         )
+        read_only_fields = fields
+
+
+class BatchCreateSerializer(serializers.Serializer):
+    """Input serializer for creating a new batch."""
+    product_name = serializers.CharField(max_length=255)
+    bulk_size_kg = serializers.FloatField(min_value=0.01)
+    location_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    provider_id = serializers.UUIDField(required=False, allow_null=True)
+    notes = serializers.CharField(required=False, allow_blank=True)
+    image_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
+    expires_at = serializers.DateTimeField(required=False, allow_null=True)
 
 # Existing ProductSerializer (The file had a duplicate ProductSerializer, I'm consolidating and keeping the more comprehensive one)
 class ProductSerializer(serializers.ModelSerializer):
@@ -88,13 +101,50 @@ class CustomerSerializer(serializers.ModelSerializer):
         # For updates, 'email' might be non-editable if it's the username.
 
 class ProviderSerializer(serializers.ModelSerializer):
-    """
-    Serializer for the Provider model.
-    """
+    """Frontend-facing provider serializer with is_verified and all registration fields."""
+    id = serializers.UUIDField(source='provider_id', read_only=True)
+    is_verified = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = Provider
-        fields = '__all__'
-        read_only_fields = ('provider_id', 'subscriber_count', 'verified', 'created_at')
+        fields = (
+            'id',
+            'business_name',
+            'description',
+            'logo_url',
+            'category',
+            'location',
+            'contact_email',
+            'owner_name',
+            'owner_email',
+            'phone',
+            'address',
+            'registration_number',
+            'latitude',
+            'longitude',
+            'rating',
+            'subscriber_count',
+            'status',
+            'is_verified',
+            'created_at',
+        )
+        read_only_fields = ('id', 'subscriber_count', 'status', 'is_verified', 'created_at')
+
+
+class ProviderRegisterSerializer(serializers.Serializer):
+    """Input serializer for registering a new provider (become-provider flow)."""
+    business_name = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True)
+    category = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    contact_email = serializers.EmailField()
+    owner_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    owner_email = serializers.EmailField(required=False, allow_blank=True)
+    phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    address = serializers.CharField(max_length=500, required=False, allow_blank=True)
+    registration_number = serializers.CharField(max_length=100, required=False, allow_blank=True)
+    latitude = serializers.FloatField(required=False, allow_null=True)
+    longitude = serializers.FloatField(required=False, allow_null=True)
+    location = serializers.CharField(max_length=255, required=False, allow_blank=True)
 
 class BatchParticipantSerializer(serializers.ModelSerializer):
     """
@@ -109,38 +159,34 @@ class BatchParticipantSerializer(serializers.ModelSerializer):
 class OrderSerializer(serializers.ModelSerializer):
     """
     Frontend-facing order serializer backed by BatchParticipant.
+    Maps to the frontend Order model: id, productName, quantityKg, status, hubName, batchId.
     """
-    order_id = serializers.UUIDField(source='participant_id', read_only=True)
+    id = serializers.UUIDField(source='participant_id', read_only=True)
     batch_id = serializers.UUIDField(source='batch.batch_id', read_only=True)
     product_name = serializers.CharField(source='batch.product.name', read_only=True)
-    provider_name = serializers.CharField(source='batch.provider.business_name', read_only=True)
+    hub_name = serializers.CharField(source='batch.provider.business_name', read_only=True)
+    quantity_kg = serializers.FloatField(source='quantity_requested', read_only=True)
 
     class Meta:
         model = BatchParticipant
         fields = (
-            'order_id',
+            'id',
             'batch_id',
             'product_name',
-            'provider_name',
-            'quantity_requested',
+            'hub_name',
+            'quantity_kg',
             'status',
             'joined_at',
         )
-        read_only_fields = (
-            'order_id',
-            'batch_id',
-            'product_name',
-            'provider_name',
-            'joined_at',
-        )
+        read_only_fields = fields
 
 
 class OrderCreateSerializer(serializers.Serializer):
     """
-    Input serializer for creating an order (joining a batch).
+    Input serializer for creating an order (joining a batch) from the orders endpoint.
     """
     batch_id = serializers.UUIDField()
-    quantity_requested = serializers.IntegerField(min_value=1)
+    quantity_kg = serializers.FloatField(min_value=0.01)
 
 
 class OrderStatusUpdateSerializer(serializers.Serializer):
@@ -154,7 +200,7 @@ class JoinBatchSerializer(serializers.Serializer):
     """
     Input serializer for /batches/<id>/join/ endpoint.
     """
-    quantity_requested = serializers.IntegerField(min_value=1)
+    quantity_kg = serializers.FloatField(min_value=0.01)
 
 class SubscriptionSerializer(serializers.ModelSerializer):
     """
