@@ -2,6 +2,8 @@ from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
 import uuid
+import secrets
+import string
 
 
 class Customer(AbstractUser):
@@ -37,8 +39,30 @@ class Provider(models.Model):
     rating = models.FloatField(blank=True, null=True) # Average rating (float)
     subscriber_count = models.IntegerField(default=0)
     verified = models.BooleanField(default=False)
+    owner_name = models.CharField(max_length=255, blank=True, default='')
+    owner_email = models.EmailField(blank=True, default='')
+    phone = models.CharField(max_length=20, blank=True, default='')
+    address = models.CharField(max_length=500, blank=True, default='')
+    registration_number = models.CharField(max_length=100, blank=True, default='')
+    latitude = models.FloatField(null=True, blank=True)
+    longitude = models.FloatField(null=True, blank=True)
+    status = models.CharField(
+        max_length=20,
+        choices=[('pending', 'Pending'), ('verified', 'Verified'), ('rejected', 'Rejected')],
+        default='pending',
+    )
+    rejection_message = models.TextField(blank=True, default='')
+    document_paths = models.JSONField(blank=True, default=list)
     created_at = models.DateTimeField(auto_now_add=True)
-    # Subscriptions will be managed via a ManyToManyField on Customer or a separate model if more complex
+
+    class Meta:
+        ordering = ['created_at']
+
+    @property
+    def is_verified(self):
+        # Backward-compatible: some older records were approved via `verified=True`
+        # before the explicit status workflow was fully adopted.
+        return self.status == 'verified' or self.verified
 
     def __str__(self):
         return self.business_name
@@ -82,18 +106,25 @@ class Batch(models.Model):
         ('expired', 'Expired'),
     ]
     batch_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    product = models.ForeignKey(Product, on_delete=models.CASCADE, related_name='batches')
-    provider = models.ForeignKey(Provider, on_delete=models.CASCADE, related_name='batches')
+    product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='batches')
+    provider = models.ForeignKey(Provider, on_delete=models.SET_NULL, null=True, blank=True, related_name='batches')
     creator = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='created_batches')
-    total_quantity = models.PositiveIntegerField() # Full pack size (target quantity)
-    filled_quantity = models.PositiveIntegerField(default=0) # How many units have been claimed
+    product_name = models.CharField(max_length=255, blank=True, default='')
+    total_quantity = models.FloatField(default=0)
+    filled_quantity = models.FloatField(default=0)
+    location_name = models.CharField(max_length=255, blank=True, default='')
+    image_url = models.URLField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
-    expires_at = models.DateTimeField(blank=True, null=True) # Optional deadline for the batch
-    notes = models.TextField(blank=True, null=True) # Optional message from creator
+    expires_at = models.DateTimeField(blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
+    # Provider pricing (set after batch is created)
+    provider_unit_price = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
+    provider_savings = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Batch for {self.product.name} ({self.status})"
+        name = self.product.name if self.product_id else self.product_name
+        return f"Batch for {name} ({self.status})"
 
 class BatchParticipant(models.Model):
     """
@@ -129,3 +160,125 @@ class Subscription(models.Model):
 
     def __str__(self):
         return f"Subscription of {self.customer.email} to {self.provider.business_name}"
+
+
+class EmailVerificationCode(models.Model):
+    """
+    Stores temporary email verification codes sent to users for registration/email verification.
+    Codes expire after a set duration (default: 15 minutes).
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    email = models.EmailField(db_index=True)
+    code = models.CharField(max_length=6, db_index=True)  # 6-digit code
+    is_used = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()  # Code expires 15 min after creation
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def save(self, *args, **kwargs):
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timezone.timedelta(minutes=15)
+        super().save(*args, **kwargs)
+
+    def is_valid(self):
+        """Check if code has not expired and not been used."""
+        return not self.is_used and timezone.now() < self.expires_at
+
+    @staticmethod
+    def generate_code():
+        """Generate a random 6-digit verification code."""
+        return ''.join(secrets.choice(string.digits) for _ in range(6))
+
+    def __str__(self):
+        return f"Verification code for {self.email}"
+
+
+class Notification(models.Model):
+    """
+    In-app notification sent to a customer.
+    """
+    NOTIFICATION_TYPES = [
+        ('batch_created', 'Batch Created'),
+        ('batch_full', 'Batch Full'),
+        ('provider_approved', 'Provider Approved'),
+        ('provider_rejected', 'Provider Rejected'),
+        ('provider_message', 'Provider Message'),
+        ('general', 'General'),
+    ]
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    recipient = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='notifications')
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    notification_type = models.CharField(max_length=30, choices=NOTIFICATION_TYPES, default='general')
+    related_batch = models.ForeignKey(Batch, on_delete=models.SET_NULL, null=True, blank=True, related_name='notifications')
+    is_read = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Notification({self.notification_type}) → {self.recipient.email}"
+
+
+class UserSettings(models.Model):
+    """
+    Persisted user preferences: language, theme, notification toggles.
+    """
+    customer = models.OneToOneField(Customer, on_delete=models.CASCADE, related_name='settings')
+    language = models.CharField(max_length=10, default='en')
+    theme = models.CharField(max_length=20, default='system')
+    notif_new_batch = models.BooleanField(default=True)
+    notif_batch_full = models.BooleanField(default=True)
+    notif_provider_approval = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Settings for {self.customer.email}"
+
+
+class BatchChatRoom(models.Model):
+    """
+    Group chat room tied to a batch. Auto-created when the batch is created.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    batch = models.OneToOneField(Batch, on_delete=models.CASCADE, related_name='chat_room')
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"ChatRoom for batch {self.batch.batch_id}"
+
+
+class ChatMember(models.Model):
+    """
+    Tracks which customers have joined a batch chat room.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    room = models.ForeignKey(BatchChatRoom, on_delete=models.CASCADE, related_name='members')
+    customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='chat_memberships')
+    joined_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ('room', 'customer')
+
+    def __str__(self):
+        return f"{self.customer.email} in {self.room}"
+
+
+class ChatMessage(models.Model):
+    """
+    A single message sent in a batch chat room.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    room = models.ForeignKey(BatchChatRoom, on_delete=models.CASCADE, related_name='messages')
+    sender = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='sent_messages')
+    content = models.TextField()
+    sent_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['sent_at']
+
+    def __str__(self):
+        return f"Message by {self.sender.email} at {self.sent_at}"

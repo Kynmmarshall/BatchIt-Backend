@@ -1,9 +1,13 @@
 import os
 from pathlib import Path
 import dj_database_url
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from project-level .env file.
+load_dotenv(BASE_DIR / '.env')
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -24,6 +28,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     # Third-party apps
     'rest_framework',
+    'rest_framework.authtoken',
     'corsheaders',
     'drf_yasg',
     # My apps
@@ -97,6 +102,11 @@ USE_TZ = True
 
 # Static files
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# Media files (user-uploaded content: logos, profile photos, batch images)
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
 # CORS Headers Settings
 CORS_ALLOW_ALL_ORIGINS = True
@@ -112,6 +122,8 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.IsAuthenticatedOrReadOnly',
     ),
     'DEFAULT_SCHEMA_CLASS': 'rest_framework.schemas.coreapi.AutoSchema',
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
 }
 
 # Swagger/OpenAPI Settings
@@ -124,3 +136,28 @@ SWAGGER_SETTINGS = {
         }
     }
 }
+
+# Email Configuration
+# Development: Console backend (prints to console)
+# Production: Brevo (Sendinblue) SMTP or other providers
+#
+# For Brevo setup:
+#   1. Sign up at brevo.com
+#   2. Get SMTP credentials from Settings > SMTP & API
+#   3. Set env vars:
+#      EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+#      EMAIL_HOST=smtp-relay.brevo.com
+#      EMAIL_PORT=587
+#      EMAIL_HOST_USER=<your-brevo-email>
+#      EMAIL_HOST_PASSWORD=<your-brevo-smtp-key>
+#      DEFAULT_FROM_EMAIL=noreply@batchit.com
+EMAIL_BACKEND = os.getenv(
+    'EMAIL_BACKEND',
+    'django.core.mail.backends.console.EmailBackend'  # Development: console output
+)
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp-relay.brevo.com')  # Brevo SMTP
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@batchit.com')

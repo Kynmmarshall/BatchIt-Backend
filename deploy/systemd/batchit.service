@@ -1,0 +1,17 @@
+[Unit]
+Description=Gunicorn instance to serve BatchIt
+After=network.target
+
+[Service]
+User=root
+Group=root
+WorkingDirectory=/root/BatchIt-Backend
+EnvironmentFile=/root/BatchIt-Backend/.env
+Environment="PATH=/root/BatchIt-Backend/.venv/bin"
+ExecStart=/root/BatchIt-Backend/.venv/bin/gunicorn --workers 3 --bind unix:/run/batchit.sock batchit_proj.wsgi:application
+
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
