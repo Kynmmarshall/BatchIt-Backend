@@ -142,9 +142,9 @@ class BatchListCreate(APIView):
             product=product,
             provider=provider,
             product_name=data['product_name'],
-            total_quantity=data['bulk_size_kg'],
+            total_quantity=data['total_quantity'],
             filled_quantity=0,
-            location_name=data.get('location_name', ''),
+            location_name=data.get('location', ''),
             notes=data.get('notes', ''),
             image_url=data.get('image_url'),
             expires_at=data.get('expires_at'),
@@ -223,7 +223,7 @@ class BatchJoinView(APIView):
         participant = _join_batch_for_customer(
             batch=batch,
             customer=request.user,
-            quantity_kg=serializer.validated_data['quantity_kg'],
+            quantity_kg=serializer.validated_data['quantity_requested'],
         )
         return Response(OrderSerializer(participant).data, status=status.HTTP_201_CREATED)
 
@@ -292,7 +292,7 @@ class OrderListCreate(APIView):
         participant = _join_batch_for_customer(
             batch=batch,
             customer=request.user,
-            quantity_kg=serializer.validated_data['quantity_kg'],
+            quantity_kg=serializer.validated_data['quantity_requested'],
         )
         return Response(OrderSerializer(participant).data, status=status.HTTP_201_CREATED)
 
@@ -759,7 +759,7 @@ class ProviderRegisterView(APIView):
             business_name=data['business_name'],
             description=data.get('description', ''),
             category=data.get('category', ''),
-            contact_email=data.get('contact_email', request.user.email),
+            contact_email=data.get('email', request.user.email),
             owner_name=data.get('owner_name', ''),
             owner_email=request.user.email,
             phone=data.get('phone', ''),

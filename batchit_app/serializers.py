@@ -38,10 +38,10 @@ class BatchSerializer(serializers.ModelSerializer):
 
 
 class BatchCreateSerializer(serializers.Serializer):
-    """Input serializer for creating a new batch."""
+    """Input serializer for creating a new batch. Accepts field names as sent by the frontend."""
     product_name = serializers.CharField(max_length=255)
-    bulk_size_kg = serializers.FloatField(min_value=0.01)
-    location_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
+    total_quantity = serializers.FloatField(min_value=0.01)
+    location = serializers.CharField(max_length=255, required=False, allow_blank=True)
     provider_id = serializers.UUIDField(required=False, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)
     image_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
@@ -136,9 +136,8 @@ class ProviderRegisterSerializer(serializers.Serializer):
     business_name = serializers.CharField(max_length=255)
     description = serializers.CharField(required=False, allow_blank=True)
     category = serializers.CharField(max_length=100, required=False, allow_blank=True)
-    contact_email = serializers.EmailField()
+    email = serializers.EmailField()
     owner_name = serializers.CharField(max_length=255, required=False, allow_blank=True)
-    owner_email = serializers.EmailField(required=False, allow_blank=True)
     phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
     address = serializers.CharField(max_length=500, required=False, allow_blank=True)
     registration_number = serializers.CharField(max_length=100, required=False, allow_blank=True)
@@ -186,7 +185,7 @@ class OrderCreateSerializer(serializers.Serializer):
     Input serializer for creating an order (joining a batch) from the orders endpoint.
     """
     batch_id = serializers.UUIDField()
-    quantity_kg = serializers.FloatField(min_value=0.01)
+    quantity_requested = serializers.FloatField(min_value=0.01)
 
 
 class OrderStatusUpdateSerializer(serializers.Serializer):
@@ -200,7 +199,7 @@ class JoinBatchSerializer(serializers.Serializer):
     """
     Input serializer for /batches/<id>/join/ endpoint.
     """
-    quantity_kg = serializers.FloatField(min_value=0.01)
+    quantity_requested = serializers.FloatField(min_value=0.01)
 
 class SubscriptionSerializer(serializers.ModelSerializer):
     """
