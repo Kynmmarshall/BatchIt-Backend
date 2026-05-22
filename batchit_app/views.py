@@ -824,6 +824,9 @@ class ProviderMyProfileView(APIView):
     GET /api/providers/my-profile/
     Returns the provider profile owned by the authenticated user (matched by owner_email).
     Returns 404 if the user hasn't registered as a provider yet.
+
+    PATCH /api/providers/my-profile/
+    Updates the authenticated provider's profile fields.
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -831,6 +834,79 @@ class ProviderMyProfileView(APIView):
         provider = Provider.objects.filter(owner_email=request.user.email).first()
         if not provider:
             return Response({'detail': 'No provider profile found.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ProviderSerializer(provider, context={'request': request}).data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        provider = Provider.objects.filter(owner_email=request.user.email).first()
+        if not provider:
+            return Response({'detail': 'No provider profile found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        serializer = ProviderRegisterSerializer(data=request.data, partial=True)
+        if not serializer.is_valid():
+            logger.warning('[ProviderMyProfileView.patch] validation errors=%s user=%s data=%s', serializer.errors, request.user.email, dict(request.data))
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        data = serializer.validated_data
+        update_fields = []
+
+        field_map = {
+            'business_name': 'business_name',
+            'description': 'description',
+            'category': 'category',
+            'email': 'contact_email',
+            'owner_name': 'owner_name',
+            'phone': 'phone',
+            'address': 'address',
+            'registration_number': 'registration_number',
+            'latitude': 'latitude',
+            'longitude': 'longitude',
+            'location': 'location',
+        }
+
+        for source, target in field_map.items():
+            if source in data:
+                setattr(provider, target, data[source])
+                update_fields.append(target)
+
+        # Optional logo update
+        logo = request.FILES.get('logo')
+        if logo:
+            upload_dir = os.path.join(settings.MEDIA_ROOT, 'provider_logos')
+            os.makedirs(upload_dir, exist_ok=True)
+            ext = os.path.splitext(logo.name)[1]
+            import uuid as _uuid
+            filename = f'{_uuid.uuid4()}{ext}'
+            filepath = os.path.join(upload_dir, filename)
+            with open(filepath, 'wb+') as f:
+                for chunk in logo.chunks():
+                    f.write(chunk)
+            provider.logo_url = request.build_absolute_uri(settings.MEDIA_URL + f'provider_logos/{filename}')
+            update_fields.append('logo_url')
+
+        # Optional document append
+        documents = request.FILES.getlist('documents')
+        if documents:
+            docs_dir = os.path.join(settings.BASE_DIR, 'providerDocs')
+            provider_dir = os.path.join(docs_dir, str(provider.provider_id))
+            os.makedirs(provider_dir, exist_ok=True)
+            stored_paths = list(provider.document_paths or [])
+            import uuid as _doc_uuid
+            for doc in documents:
+                ext = os.path.splitext(doc.name)[1]
+                safe_name = f'{_doc_uuid.uuid4()}{ext}'
+                absolute_path = os.path.join(provider_dir, safe_name)
+                with open(absolute_path, 'wb+') as f:
+                    for chunk in doc.chunks():
+                        f.write(chunk)
+                stored_paths.append(os.path.join(str(provider.provider_id), safe_name).replace('\\', '/'))
+            provider.document_paths = stored_paths
+            update_fields.append('document_paths')
+
+        if not update_fields:
+            return Response({'detail': 'No changes provided.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        provider.save(update_fields=list(set(update_fields)))
+        logger.info('[ProviderMyProfileView.patch] updated provider=%s user=%s fields=%s', provider.provider_id, request.user.email, sorted(set(update_fields)))
         return Response(ProviderSerializer(provider, context={'request': request}).data, status=status.HTTP_200_OK)
 
 
