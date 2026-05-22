@@ -163,38 +163,49 @@ class BatchListCreate(APIView):
                     pack_price=0,
                 )
 
-        # Handle optional image file upload
+        # Handle optional image file upload; if storage fails, create the batch anyway.
         image_url = data.get('image_url')
         image_file = request.FILES.get('image')
         if image_file:
-            import uuid as _uuid
-            upload_dir = os.path.join(settings.MEDIA_ROOT, 'batch_images')
-            os.makedirs(upload_dir, exist_ok=True)
-            ext = os.path.splitext(image_file.name)[1]
-            filename = f'{_uuid.uuid4()}{ext}'
-            filepath = os.path.join(upload_dir, filename)
-            with open(filepath, 'wb+') as f:
-                for chunk in image_file.chunks():
-                    f.write(chunk)
-            image_url = request.build_absolute_uri(
-                settings.MEDIA_URL + f'batch_images/{filename}'
+            try:
+                import uuid as _uuid
+                upload_dir = os.path.join(settings.MEDIA_ROOT, 'batch_images')
+                os.makedirs(upload_dir, exist_ok=True)
+                ext = os.path.splitext(image_file.name)[1]
+                filename = f'{_uuid.uuid4()}{ext}'
+                filepath = os.path.join(upload_dir, filename)
+                with open(filepath, 'wb+') as f:
+                    for chunk in image_file.chunks():
+                        f.write(chunk)
+                image_url = request.build_absolute_uri(
+                    settings.MEDIA_URL + f'batch_images/{filename}'
+                )
+                logger.info('[BatchListCreate.post] stored batch image=%s', image_url)
+            except Exception as exc:
+                logger.exception('[BatchListCreate.post] image upload failed, continuing without image: %s', exc)
+                image_url = data.get('image_url')
+
+        with transaction.atomic():
+            batch = Batch.objects.create(
+                creator=request.user,
+                product=product,
+                provider=provider,
+                product_name=data['product_name'],
+                total_quantity=data['total_quantity'],
+                filled_quantity=0,
+                location_name=data.get('location', ''),
+                notes=data.get('notes', ''),
+                image_url=image_url,
+                expires_at=data.get('expires_at'),
             )
 
-        batch = Batch.objects.create(
-            creator=request.user,
-            product=product,
-            provider=provider,
-            product_name=data['product_name'],
-            total_quantity=data['total_quantity'],
-            filled_quantity=0,
-            location_name=data.get('location', ''),
-            notes=data.get('notes', ''),
-            image_url=image_url,
-            expires_at=data.get('expires_at'),
-        )
-        # Auto-create chat room and add creator as first member (Phase 8)
-        chat_room = BatchChatRoom.objects.create(batch=batch)
-        ChatMember.objects.create(room=chat_room, customer=request.user)
+        # Auto-create chat room and add creator as first member, but do not fail batch creation if it breaks.
+        try:
+            chat_room = BatchChatRoom.objects.create(batch=batch)
+            ChatMember.objects.create(room=chat_room, customer=request.user)
+        except Exception as exc:
+            logger.exception('[BatchListCreate.post] chat room bootstrap failed for batch=%s: %s', batch.batch_id, exc)
+
         logger.info('[BatchListCreate.post] created batch id=%s product=%s user=%s', batch.batch_id, batch.product_name, request.user.email)
         return Response(BatchSerializer(batch).data, status=status.HTTP_201_CREATED)
 
