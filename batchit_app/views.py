@@ -67,6 +67,7 @@ class ProviderListCreate(generics.ListCreateAPIView):
     queryset = Provider.objects.all()
     serializer_class = ProviderSerializer
     permission_classes = [permissions.IsAuthenticatedOrReadOnly]
+    pagination_class = None
 
 class ProviderDetail(generics.RetrieveUpdateDestroyAPIView):
     """Retrieves, updates, or deletes a specific provider."""
@@ -137,6 +138,23 @@ class BatchListCreate(APIView):
                     pack_price=0,
                 )
 
+        # Handle optional image file upload
+        image_url = data.get('image_url')
+        image_file = request.FILES.get('image')
+        if image_file:
+            import uuid as _uuid
+            upload_dir = os.path.join(settings.MEDIA_ROOT, 'batch_images')
+            os.makedirs(upload_dir, exist_ok=True)
+            ext = os.path.splitext(image_file.name)[1]
+            filename = f'{_uuid.uuid4()}{ext}'
+            filepath = os.path.join(upload_dir, filename)
+            with open(filepath, 'wb+') as f:
+                for chunk in image_file.chunks():
+                    f.write(chunk)
+            image_url = request.build_absolute_uri(
+                settings.MEDIA_URL + f'batch_images/{filename}'
+            )
+
         batch = Batch.objects.create(
             creator=request.user,
             product=product,
@@ -146,7 +164,7 @@ class BatchListCreate(APIView):
             filled_quantity=0,
             location_name=data.get('location', ''),
             notes=data.get('notes', ''),
-            image_url=data.get('image_url'),
+            image_url=image_url,
             expires_at=data.get('expires_at'),
         )
         return Response(BatchSerializer(batch).data, status=status.HTTP_201_CREATED)

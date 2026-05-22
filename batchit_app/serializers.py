@@ -104,6 +104,7 @@ class ProviderSerializer(serializers.ModelSerializer):
     """Frontend-facing provider serializer with is_verified and all registration fields."""
     id = serializers.UUIDField(source='provider_id', read_only=True)
     is_verified = serializers.BooleanField(read_only=True)
+    email = serializers.EmailField(source='contact_email', read_only=True)
 
     class Meta:
         model = Provider
@@ -114,7 +115,7 @@ class ProviderSerializer(serializers.ModelSerializer):
             'logo_url',
             'category',
             'location',
-            'contact_email',
+            'email',
             'owner_name',
             'owner_email',
             'phone',
@@ -128,7 +129,7 @@ class ProviderSerializer(serializers.ModelSerializer):
             'is_verified',
             'created_at',
         )
-        read_only_fields = ('id', 'subscriber_count', 'status', 'is_verified', 'created_at')
+        read_only_fields = ('id', 'email', 'subscriber_count', 'status', 'is_verified', 'created_at')
 
 
 class ProviderRegisterSerializer(serializers.Serializer):
@@ -162,9 +163,12 @@ class OrderSerializer(serializers.ModelSerializer):
     """
     id = serializers.UUIDField(source='participant_id', read_only=True)
     batch_id = serializers.UUIDField(source='batch.batch_id', read_only=True)
-    product_name = serializers.CharField(source='batch.product.name', read_only=True)
-    hub_name = serializers.CharField(source='batch.provider.business_name', read_only=True)
+    product_name = serializers.CharField(source='batch.product_name', read_only=True)
+    hub_name = serializers.SerializerMethodField()
     quantity_kg = serializers.FloatField(source='quantity_requested', read_only=True)
+
+    def get_hub_name(self, obj):
+        return obj.batch.provider.business_name if obj.batch and obj.batch.provider else ''
 
     class Meta:
         model = BatchParticipant

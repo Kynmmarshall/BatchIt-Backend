@@ -116,7 +116,8 @@ class Batch(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"Batch for {self.product.name} ({self.status})"
+        name = self.product.name if self.product_id else self.product_name
+        return f"Batch for {name} ({self.status})"
 
 class BatchParticipant(models.Model):
     """
