@@ -52,6 +52,7 @@ class Provider(models.Model):
         default='pending',
     )
     rejection_message = models.TextField(blank=True, default='')
+    document_paths = models.JSONField(blank=True, default=list)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

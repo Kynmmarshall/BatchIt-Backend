@@ -8,6 +8,7 @@ from django.db import transaction
 from django.db.models import Sum
 from django.core.mail import send_mail
 from django.conf import settings
+from django.http import FileResponse, Http404
 import logging
 from google.auth.transport import requests
 from google.oauth2 import id_token
@@ -830,7 +831,7 @@ class ProviderMyProfileView(APIView):
         provider = Provider.objects.filter(owner_email=request.user.email).first()
         if not provider:
             return Response({'detail': 'No provider profile found.'}, status=status.HTTP_404_NOT_FOUND)
-        return Response(ProviderSerializer(provider).data, status=status.HTTP_200_OK)
+        return Response(ProviderSerializer(provider, context={'request': request}).data, status=status.HTTP_200_OK)
 
 
 class ProviderRegisterView(APIView):
@@ -886,10 +887,63 @@ class ProviderRegisterView(APIView):
             longitude=data.get('longitude'),
             location=data.get('location', ''),
             logo_url=logo_url,
+            document_paths=[],
             status='pending',
         )
+
+        documents = request.FILES.getlist('documents')
+        if documents:
+            docs_dir = os.path.join(settings.BASE_DIR, 'providerDocs')
+            provider_dir = os.path.join(docs_dir, str(provider.provider_id))
+            os.makedirs(provider_dir, exist_ok=True)
+            stored_paths = []
+            import uuid as _doc_uuid
+            for doc in documents:
+                ext = os.path.splitext(doc.name)[1]
+                safe_name = f'{_doc_uuid.uuid4()}{ext}'
+                absolute_path = os.path.join(provider_dir, safe_name)
+                with open(absolute_path, 'wb+') as f:
+                    for chunk in doc.chunks():
+                        f.write(chunk)
+                stored_paths.append(os.path.join(str(provider.provider_id), safe_name).replace('\\', '/'))
+            provider.document_paths = stored_paths
+            provider.save(update_fields=['document_paths'])
+
         logger.info('[ProviderRegisterView.post] created provider id=%s name=%s for user=%s', provider.provider_id, provider.business_name, request.user.email)
-        return Response(ProviderSerializer(provider).data, status=status.HTTP_201_CREATED)
+        return Response(ProviderSerializer(provider, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+
+class ProviderDocumentDownloadView(APIView):
+    """
+    GET /api/providers/<provider_id>/documents/<index>/download/
+    Downloads a provider verification document.
+    Allowed for admin staff and provider owner.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, provider_id, index):
+        provider = Provider.objects.filter(provider_id=provider_id).first()
+        if not provider:
+            return Response({'detail': 'Provider not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not (request.user.is_staff or provider.owner_email == request.user.email):
+            return Response({'detail': 'You do not have permission to access this document.'}, status=status.HTTP_403_FORBIDDEN)
+
+        docs = provider.document_paths or []
+        if index < 0 or index >= len(docs):
+            return Response({'detail': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
+
+        relative = docs[index]
+        docs_root = os.path.join(settings.BASE_DIR, 'providerDocs')
+        absolute = os.path.normpath(os.path.join(docs_root, relative))
+        normalized_root = os.path.normpath(docs_root)
+
+        if not absolute.startswith(normalized_root):
+            raise Http404('Invalid document path.')
+        if not os.path.exists(absolute):
+            raise Http404('Document file not found.')
+
+        return FileResponse(open(absolute, 'rb'), as_attachment=True, filename=os.path.basename(absolute))
 
 
 # ---------------------------------------------------------------------------
@@ -910,7 +964,7 @@ class AdminProviderListView(APIView):
         status_filter = request.query_params.get('status')
         if status_filter:
             qs = qs.filter(status=status_filter)
-        return Response(ProviderSerializer(qs, many=True).data)
+        return Response(ProviderSerializer(qs, many=True, context={'request': request}).data)
 
 
 class AdminProviderVerifyView(APIView):
@@ -958,7 +1012,7 @@ class AdminProviderVerifyView(APIView):
             pass
 
         logger.info('[AdminProviderVerifyView] provider=%s action=%s by admin=%s', provider_id, data['action'], request.user.email)
-        return Response(ProviderSerializer(provider).data, status=status.HTTP_200_OK)
+        return Response(ProviderSerializer(provider, context={'request': request}).data, status=status.HTTP_200_OK)
 
 
 # ---------------------------------------------------------------------------
@@ -1137,7 +1191,7 @@ class FollowedProvidersView(APIView):
             customer=request.user
         ).values_list('provider_id', flat=True)
         providers = Provider.objects.filter(provider_id__in=provider_ids)
-        return Response(ProviderSerializer(providers, many=True).data, status=status.HTTP_200_OK)
+        return Response(ProviderSerializer(providers, many=True, context={'request': request}).data, status=status.HTTP_200_OK)
 
 
 # ---------------------------------------------------------------------------

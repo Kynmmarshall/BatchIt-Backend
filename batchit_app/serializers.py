@@ -111,6 +111,30 @@ class ProviderSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(source='provider_id', read_only=True)
     is_verified = serializers.BooleanField(read_only=True)
     email = serializers.EmailField(source='contact_email', read_only=True)
+    logo_url = serializers.SerializerMethodField()
+    document_urls = serializers.SerializerMethodField()
+
+    def get_logo_url(self, obj):
+        logo = obj.logo_url or ''
+        if not logo:
+            return None
+        if logo.startswith('http://') or logo.startswith('https://'):
+            return logo
+        request = self.context.get('request')
+        if request:
+            return request.build_absolute_uri(logo)
+        return logo
+
+    def get_document_urls(self, obj):
+        request = self.context.get('request')
+        urls = []
+        for index, _ in enumerate(obj.document_paths or []):
+            relative = f'/api/providers/{obj.provider_id}/documents/{index}/download/'
+            if request:
+                urls.append(request.build_absolute_uri(relative))
+            else:
+                urls.append(relative)
+        return urls
 
     class Meta:
         model = Provider
@@ -127,6 +151,7 @@ class ProviderSerializer(serializers.ModelSerializer):
             'phone',
             'address',
             'registration_number',
+            'document_urls',
             'latitude',
             'longitude',
             'rating',

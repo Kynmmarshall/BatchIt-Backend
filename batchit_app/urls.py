@@ -43,6 +43,7 @@ urlpatterns = [
     path('providers/my-profile/', views.ProviderMyProfileView.as_view(), name='provider-my-profile'),
     path('providers/register/', views.ProviderRegisterView.as_view(), name='provider-register'),
     path('providers/<uuid:provider_id>/', views.ProviderDetail.as_view(), name='provider-detail'),
+    path('providers/<uuid:provider_id>/documents/<int:index>/download/', views.ProviderDocumentDownloadView.as_view(), name='provider-document-download'),
 
     # Product URLs
     path('products/', views.ProductListCreate.as_view(), name='product-list-create'),
