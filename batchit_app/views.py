@@ -843,9 +843,41 @@ class ProviderRegisterView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        logger.info('[ProviderRegisterView.post] user=%s data=%s files=%s', request.user.email, dict(request.data), list(request.FILES.keys()))
+        incoming_keys = sorted(request.data.keys())
+        files_meta = {
+            key: [
+                {
+                    'name': f.name,
+                    'size': f.size,
+                    'content_type': getattr(f, 'content_type', None),
+                }
+                for f in request.FILES.getlist(key)
+            ]
+            for key in request.FILES.keys()
+        }
+        logger.info(
+            '[ProviderRegisterView.post] user=%s content_type=%s keys=%s files=%s',
+            request.user.email,
+            request.content_type,
+            incoming_keys,
+            files_meta,
+        )
+
+        required_fields = {'business_name', 'email'}
+        missing_required = sorted(
+            field for field in required_fields if not str(request.data.get(field, '')).strip()
+        )
+        if missing_required:
+            logger.warning(
+                '[ProviderRegisterView.post] missing required fields=%s user=%s raw_data=%s',
+                missing_required,
+                request.user.email,
+                dict(request.data),
+            )
+
         # Prevent duplicate provider registration
         if Provider.objects.filter(owner_email=request.user.email).exists():
+            logger.warning('[ProviderRegisterView.post] duplicate registration attempt user=%s', request.user.email)
             return Response(
                 {'detail': 'You have already registered as a provider.'},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -853,9 +885,15 @@ class ProviderRegisterView(APIView):
 
         serializer = ProviderRegisterSerializer(data=request.data)
         if not serializer.is_valid():
-            logger.warning('[ProviderRegisterView.post] validation errors=%s', serializer.errors)
+            logger.warning(
+                '[ProviderRegisterView.post] validation errors=%s user=%s data=%s',
+                serializer.errors,
+                request.user.email,
+                dict(request.data),
+            )
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         data = serializer.validated_data
+        logger.info('[ProviderRegisterView.post] validated user=%s fields=%s', request.user.email, sorted(data.keys()))
 
         logo_url = None
         logo = request.FILES.get('logo')
@@ -908,6 +946,9 @@ class ProviderRegisterView(APIView):
                 stored_paths.append(os.path.join(str(provider.provider_id), safe_name).replace('\\', '/'))
             provider.document_paths = stored_paths
             provider.save(update_fields=['document_paths'])
+            logger.info('[ProviderRegisterView.post] stored %s documents for provider=%s', len(stored_paths), provider.provider_id)
+        else:
+            logger.info('[ProviderRegisterView.post] no documents uploaded for provider=%s', provider.provider_id)
 
         logger.info('[ProviderRegisterView.post] created provider id=%s name=%s for user=%s', provider.provider_id, provider.business_name, request.user.email)
         return Response(ProviderSerializer(provider, context={'request': request}).data, status=status.HTTP_201_CREATED)
