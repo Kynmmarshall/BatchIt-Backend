@@ -1027,15 +1027,17 @@ class AdminProviderVerifyView(APIView):
 
         if data['action'] == 'approve':
             provider.status = 'verified'
+            provider.verified = True
             provider.rejection_message = ''
-            provider.save(update_fields=['status', 'rejection_message'])
+            provider.save(update_fields=['status', 'verified', 'rejection_message'])
             notif_type = 'provider_approved'
             title = 'Provider profile approved!'
             body = f'Congratulations! Your provider profile "{provider.business_name}" has been approved.'
         else:
             provider.status = 'rejected'
+            provider.verified = False
             provider.rejection_message = data.get('rejection_message', '')
-            provider.save(update_fields=['status', 'rejection_message'])
+            provider.save(update_fields=['status', 'verified', 'rejection_message'])
             notif_type = 'provider_rejected'
             title = 'Provider profile rejected'
             body = f'Your provider profile "{provider.business_name}" was rejected. Reason: {provider.rejection_message}'

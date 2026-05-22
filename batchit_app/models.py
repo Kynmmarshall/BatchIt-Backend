@@ -60,7 +60,9 @@ class Provider(models.Model):
 
     @property
     def is_verified(self):
-        return self.status == 'verified'
+        # Backward-compatible: some older records were approved via `verified=True`
+        # before the explicit status workflow was fully adopted.
+        return self.status == 'verified' or self.verified
 
     def __str__(self):
         return self.business_name
