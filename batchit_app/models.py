@@ -200,6 +200,7 @@ class Notification(models.Model):
     In-app notification sent to a customer.
     """
     NOTIFICATION_TYPES = [
+        ('batch_created', 'Batch Created'),
         ('batch_full', 'Batch Full'),
         ('provider_approved', 'Provider Approved'),
         ('provider_rejected', 'Provider Rejected'),

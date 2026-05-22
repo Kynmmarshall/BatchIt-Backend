@@ -207,6 +207,30 @@ class BatchListCreate(APIView):
         except Exception as exc:
             logger.exception('[BatchListCreate.post] chat room bootstrap failed for batch=%s: %s', batch.batch_id, exc)
 
+        # Notify all followers of the provider that a new batch is available.
+        if provider:
+            try:
+                subscriber_ids = list(
+                    Subscription.objects.filter(provider=provider)
+                    .exclude(customer=request.user)
+                    .values_list('customer_id', flat=True)
+                )
+                if subscriber_ids:
+                    sub_notifications = [
+                        Notification(
+                            recipient_id=cid,
+                            notification_type='batch_created',
+                            title=f'New batch: {batch.product_name}',
+                            body=f'{provider.business_name} just created a new batch for {batch.product_name}. Join now before it fills up!',
+                            related_batch=batch,
+                        )
+                        for cid in subscriber_ids
+                    ]
+                    Notification.objects.bulk_create(sub_notifications)
+                    logger.info('[BatchListCreate.post] notified %d subscribers of provider=%s', len(sub_notifications), provider.provider_id)
+            except Exception as exc:
+                logger.exception('[BatchListCreate.post] subscriber notification failed: %s', exc)
+
         logger.info('[BatchListCreate.post] created batch id=%s product=%s user=%s', batch.batch_id, batch.product_name, request.user.email)
         return Response(BatchSerializer(batch).data, status=status.HTTP_201_CREATED)
 
@@ -277,18 +301,44 @@ def _join_batch_for_customer(*, batch, customer, quantity_kg):
 
 
 def _notify_batch_full(batch):
-    """Create a 'batch_full' notification for every participant in the batch."""
+    """
+    Create 'batch_full' notifications when a batch reaches capacity.
+    Notifies:
+      - Every participant: go collect or request delivery.
+      - Every subscriber of the provider (not already a participant): batch is ready.
+    """
     participants = BatchParticipant.objects.filter(batch=batch).select_related('customer')
+    participant_ids = {p.customer_id for p in participants}
+
     notifications = [
         Notification(
             recipient=p.customer,
-            title='Batch is full!',
-            body=f'The batch for "{batch.product_name}" is now full and ready for confirmation.',
+            title='Your batch is full — time to collect!',
+            body=f'The batch for "{batch.product_name}" is now full. Go collect your order or request delivery.',
             notification_type='batch_full',
             related_batch=batch,
         )
         for p in participants
     ]
+
+    # Also notify provider subscribers who are not already participants.
+    if batch.provider_id:
+        subscriber_ids = list(
+            Subscription.objects.filter(provider_id=batch.provider_id)
+            .exclude(customer_id__in=participant_ids)
+            .values_list('customer_id', flat=True)
+        )
+        notifications += [
+            Notification(
+                recipient_id=sid,
+                title=f'Batch full at {batch.provider.business_name}',
+                body=f'A "{batch.product_name}" batch at {batch.provider.business_name} just filled up. Contact the provider to join the next one!',
+                notification_type='batch_full',
+                related_batch=batch,
+            )
+            for sid in subscriber_ids
+        ]
+
     Notification.objects.bulk_create(notifications)
     logger.info('[_notify_batch_full] created %d notifications for batch=%s', len(notifications), batch.batch_id)
 

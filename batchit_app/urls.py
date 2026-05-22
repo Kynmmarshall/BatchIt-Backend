@@ -38,12 +38,14 @@ urlpatterns = [
     path('customers/', views.CustomerListCreate.as_view(), name='customer-list-create'),
     path('customers/<uuid:customer_id>/', views.CustomerDetail.as_view(), name='customer-detail'),
 
-    # Provider URLs — my-profile must come before the detail pattern
+    # Provider URLs — literal paths must come before <uuid:provider_id> patterns
     path('providers/', views.ProviderListCreate.as_view(), name='provider-list-create'),
     path('providers/my-profile/', views.ProviderMyProfileView.as_view(), name='provider-my-profile'),
     path('providers/register/', views.ProviderRegisterView.as_view(), name='provider-register'),
+    path('providers/followed/', views.FollowedProvidersView.as_view(), name='provider-followed'),
     path('providers/<uuid:provider_id>/', views.ProviderDetail.as_view(), name='provider-detail'),
     path('providers/<uuid:provider_id>/documents/<int:index>/download/', views.ProviderDocumentDownloadView.as_view(), name='provider-document-download'),
+    path('providers/<uuid:provider_id>/follow/', views.FollowProviderView.as_view(), name='provider-follow'),
 
     # Product URLs
     path('products/', views.ProductListCreate.as_view(), name='product-list-create'),
@@ -76,10 +78,6 @@ urlpatterns = [
     # Admin — provider verification
     path('admin/providers/', views.AdminProviderListView.as_view(), name='admin-provider-list'),
     path('admin/providers/<uuid:provider_id>/verify/', views.AdminProviderVerifyView.as_view(), name='admin-provider-verify'),
-
-    # Provider — follow / unfollow / list followed
-    path('providers/followed/', views.FollowedProvidersView.as_view(), name='provider-followed'),
-    path('providers/<uuid:provider_id>/follow/', views.FollowProviderView.as_view(), name='provider-follow'),
 
     # Notifications
     path('notifications/', views.NotificationListView.as_view(), name='notification-list'),
