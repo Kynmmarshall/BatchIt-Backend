@@ -11,6 +11,13 @@ class Migration(migrations.Migration):
     ]
 
     operations = [
+        # --- Provider: rejection_message (added to model but was missing a migration) ---
+        migrations.AddField(
+            model_name='provider',
+            name='rejection_message',
+            field=models.TextField(blank=True, default=''),
+        ),
+
         # --- Batch pricing fields ---
         migrations.AddField(
             model_name='batch',
