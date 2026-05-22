@@ -102,18 +102,30 @@ class BatchListCreate(APIView):
         qs = Batch.objects.select_related('provider').all()
         status_filter = request.query_params.get('status')
         location_filter = request.query_params.get('location')
-        if status_filter:
+        creator_filter = request.query_params.get('creator')
+
+        if creator_filter == 'me' and request.user.is_authenticated:
+            qs = qs.filter(creator=request.user)
+            logger.info('[BatchListCreate.get] creator=me filter for user=%s', request.user.email)
+        elif status_filter:
             qs = qs.filter(status=status_filter)
+            logger.debug('[BatchListCreate.get] status filter=%s', status_filter)
         else:
             qs = qs.filter(status='open')
+
         if location_filter:
             qs = qs.filter(location_name__icontains=location_filter)
+
         serializer = BatchSerializer(qs, many=True)
+        logger.info('[BatchListCreate.get] returning %d batches (user=%s)', len(serializer.data), getattr(request.user, 'email', 'anon'))
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request):
+        logger.info('[BatchListCreate.post] user=%s data=%s files=%s', request.user.email, dict(request.data), list(request.FILES.keys()))
         serializer = BatchCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            logger.warning('[BatchListCreate.post] validation errors=%s', serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         data = serializer.validated_data
 
         provider = None
@@ -167,6 +179,7 @@ class BatchListCreate(APIView):
             image_url=image_url,
             expires_at=data.get('expires_at'),
         )
+        logger.info('[BatchListCreate.post] created batch id=%s product=%s user=%s', batch.batch_id, batch.product_name, request.user.email)
         return Response(BatchSerializer(batch).data, status=status.HTTP_201_CREATED)
 
 class BatchDetail(generics.RetrieveUpdateDestroyAPIView):
@@ -234,8 +247,11 @@ class BatchJoinView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request, batch_id):
+        logger.info('[BatchJoinView.post] user=%s batch_id=%s data=%s', request.user.email, batch_id, request.data)
         serializer = JoinBatchSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            logger.warning('[BatchJoinView.post] validation errors=%s', serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         batch = generics.get_object_or_404(Batch, batch_id=batch_id)
         participant = _join_batch_for_customer(
@@ -243,6 +259,7 @@ class BatchJoinView(APIView):
             customer=request.user,
             quantity_kg=serializer.validated_data['quantity_requested'],
         )
+        logger.info('[BatchJoinView.post] joined batch=%s qty=%s user=%s', batch_id, serializer.validated_data['quantity_requested'], request.user.email)
         return Response(OrderSerializer(participant).data, status=status.HTTP_201_CREATED)
 
 # --- BatchParticipant Views ---
@@ -292,6 +309,7 @@ class OrderListCreate(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
+        logger.info('[OrderListCreate.get] user=%s', request.user.email)
         queryset = BatchParticipant.objects.filter(customer=request.user).select_related(
             'batch', 'batch__product', 'batch__provider'
         )
@@ -300,11 +318,15 @@ class OrderListCreate(APIView):
             queryset = queryset.filter(status=status_filter)
 
         serializer = OrderSerializer(queryset, many=True)
+        logger.info('[OrderListCreate.get] returning %d orders for user=%s', len(serializer.data), request.user.email)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request):
+        logger.info('[OrderListCreate.post] user=%s data=%s', request.user.email, request.data)
         serializer = OrderCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            logger.warning('[OrderListCreate.post] validation errors=%s', serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
         batch = generics.get_object_or_404(Batch, batch_id=serializer.validated_data['batch_id'])
         participant = _join_batch_for_customer(
@@ -312,6 +334,7 @@ class OrderListCreate(APIView):
             customer=request.user,
             quantity_kg=serializer.validated_data['quantity_requested'],
         )
+        logger.info('[OrderListCreate.post] joined batch=%s qty=%s user=%s', batch.batch_id, serializer.validated_data['quantity_requested'], request.user.email)
         return Response(OrderSerializer(participant).data, status=status.HTTP_201_CREATED)
 
 
@@ -697,6 +720,7 @@ class UpdateProfileView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def patch(self, request):
+        logger.info('[UpdateProfileView.patch] user=%s fields=%s has_photo=%s', request.user.email, list(request.data.keys()), 'photo' in request.FILES)
         user = request.user
         first_name = request.data.get('first_name', user.first_name)
         last_name = request.data.get('last_name', user.last_name)
@@ -746,6 +770,7 @@ class ProviderRegisterView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
+        logger.info('[ProviderRegisterView.post] user=%s data=%s files=%s', request.user.email, dict(request.data), list(request.FILES.keys()))
         # Prevent duplicate provider registration
         if Provider.objects.filter(owner_email=request.user.email).exists():
             return Response(
@@ -754,7 +779,9 @@ class ProviderRegisterView(APIView):
             )
 
         serializer = ProviderRegisterSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        if not serializer.is_valid():
+            logger.warning('[ProviderRegisterView.post] validation errors=%s', serializer.errors)
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
         data = serializer.validated_data
 
         logo_url = None
@@ -789,4 +816,5 @@ class ProviderRegisterView(APIView):
             logo_url=logo_url,
             status='pending',
         )
+        logger.info('[ProviderRegisterView.post] created provider id=%s name=%s for user=%s', provider.provider_id, provider.business_name, request.user.email)
         return Response(ProviderSerializer(provider).data, status=status.HTTP_201_CREATED)
