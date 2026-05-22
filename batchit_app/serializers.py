@@ -194,9 +194,19 @@ class OrderCreateSerializer(serializers.Serializer):
 
 class OrderStatusUpdateSerializer(serializers.Serializer):
     """
-    Input serializer for updating order status.
+    Input serializer for updating order status or quantity.
+    Both fields are optional; at least one must be provided.
     """
-    status = serializers.ChoiceField(choices=BatchParticipant._meta.get_field('status').choices)
+    status = serializers.ChoiceField(
+        choices=BatchParticipant._meta.get_field('status').choices,
+        required=False,
+    )
+    quantity_kg = serializers.FloatField(min_value=0.01, required=False)
+
+    def validate(self, data):
+        if not data.get('status') and not data.get('quantity_kg'):
+            raise serializers.ValidationError('Provide at least one of: status, quantity_kg.')
+        return data
 
 
 class JoinBatchSerializer(serializers.Serializer):

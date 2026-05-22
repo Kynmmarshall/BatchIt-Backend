@@ -364,12 +364,31 @@ class OrderDetail(APIView):
         return Response(OrderSerializer(participant).data, status=status.HTTP_200_OK)
 
     def patch(self, request, order_id):
+        logger.info('[OrderDetail.patch] user=%s order_id=%s data=%s', request.user.email, order_id, request.data)
         participant = self._get_object(order_id, request.user)
         serializer = OrderStatusUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
 
-        participant.status = serializer.validated_data['status']
-        participant.save(update_fields=['status'])
+        if 'status' in data:
+            participant.status = data['status']
+            participant.save(update_fields=['status'])
+
+        if 'quantity_kg' in data:
+            new_qty = data['quantity_kg']
+            with transaction.atomic():
+                batch = Batch.objects.select_for_update().get(batch_id=participant.batch.batch_id)
+                old_qty = participant.quantity_requested
+                available = batch.total_quantity - (batch.filled_quantity - old_qty)
+                if new_qty > available:
+                    raise ValidationError({'quantity_kg': f'Only {available} kg available in this batch.'})
+                participant.quantity_requested = new_qty
+                participant.save(update_fields=['quantity_requested'])
+                batch.filled_quantity = batch.filled_quantity - old_qty + new_qty
+                batch.status = 'filled' if batch.filled_quantity >= batch.total_quantity else 'open'
+                batch.save(update_fields=['filled_quantity', 'status'])
+                logger.info('[OrderDetail.patch] qty updated order=%s old=%s new=%s', order_id, old_qty, new_qty)
+
         return Response(OrderSerializer(participant).data, status=status.HTTP_200_OK)
 
     def delete(self, request, order_id):
