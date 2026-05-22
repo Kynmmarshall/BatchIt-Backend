@@ -131,7 +131,13 @@ class BatchListCreate(APIView):
         provider = None
         provider_id = data.get('provider_id')
         if provider_id:
-            provider = generics.get_object_or_404(Provider, provider_id=provider_id)
+            try:
+                import uuid as _uuid_mod
+                provider = Provider.objects.filter(provider_id=_uuid_mod.UUID(str(provider_id))).first()
+                if not provider:
+                    logger.warning('[BatchListCreate.post] provider_id=%s not found, continuing without provider', provider_id)
+            except (ValueError, AttributeError):
+                logger.warning('[BatchListCreate.post] provider_id=%s is not a valid UUID, skipping', provider_id)
 
         # Find or create a Product under this provider for the given name
         product = None

@@ -42,7 +42,7 @@ class BatchCreateSerializer(serializers.Serializer):
     product_name = serializers.CharField(max_length=255)
     total_quantity = serializers.FloatField(min_value=0.01)
     location = serializers.CharField(max_length=255, required=False, allow_blank=True)
-    provider_id = serializers.UUIDField(required=False, allow_null=True)
+    provider_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)
     image_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
     expires_at = serializers.DateTimeField(required=False, allow_null=True)
