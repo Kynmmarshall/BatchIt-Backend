@@ -1,7 +1,11 @@
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import authenticate
-from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription, EmailVerificationCode
+from .models import (
+    Customer, Provider, Product, Batch, BatchParticipant, Subscription,
+    EmailVerificationCode, Notification, UserSettings, BatchChatRoom,
+    ChatMember, ChatMessage,
+)
 import re
 
 class BatchSerializer(serializers.ModelSerializer):
@@ -32,6 +36,8 @@ class BatchSerializer(serializers.ModelSerializer):
             'expires_at',
             'notes',
             'image_url',
+            'provider_unit_price',
+            'provider_savings',
             'created_at',
         )
         read_only_fields = fields
@@ -365,6 +371,7 @@ class AuthDetailSerializer(serializers.ModelSerializer):
             'last_name',
             'phone',
             'profile_photo_url',
+            'is_staff',
             'created_at',
         )
         read_only_fields = (
@@ -375,6 +382,7 @@ class AuthDetailSerializer(serializers.ModelSerializer):
             'last_name',
             'phone',
             'profile_photo_url',
+            'is_staff',
             'created_at',
         )
 
@@ -518,3 +526,85 @@ class GoogleLoginSerializer(serializers.Serializer):
         if not value or not value.strip():
             raise serializers.ValidationError('ID token cannot be empty.')
         return value.strip()
+
+
+# --- New Serializers (Phases 1–8) ---
+
+class NotificationSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Notification
+        fields = (
+            'id', 'title', 'body', 'notification_type',
+            'related_batch', 'is_read', 'created_at',
+        )
+        read_only_fields = fields
+
+
+class UserSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserSettings
+        fields = (
+            'language', 'theme',
+            'notif_new_batch', 'notif_batch_full', 'notif_provider_approval',
+            'updated_at',
+        )
+        read_only_fields = ('updated_at',)
+
+
+class ChatMessageSerializer(serializers.ModelSerializer):
+    sender_name = serializers.SerializerMethodField()
+    sender_id = serializers.UUIDField(source='sender.customer_id', read_only=True)
+
+    def get_sender_name(self, obj):
+        return f"{obj.sender.first_name} {obj.sender.last_name}".strip() or obj.sender.email
+
+    class Meta:
+        model = ChatMessage
+        fields = ('id', 'sender_id', 'sender_name', 'content', 'sent_at')
+        read_only_fields = ('id', 'sender_id', 'sender_name', 'sent_at')
+
+
+class ChatMemberSerializer(serializers.ModelSerializer):
+    customer_id = serializers.UUIDField(source='customer.customer_id', read_only=True)
+    name = serializers.SerializerMethodField()
+
+    def get_name(self, obj):
+        return f"{obj.customer.first_name} {obj.customer.last_name}".strip() or obj.customer.email
+
+    class Meta:
+        model = ChatMember
+        fields = ('id', 'customer_id', 'name', 'joined_at')
+        read_only_fields = fields
+
+
+class BatchChatRoomSerializer(serializers.ModelSerializer):
+    members = ChatMemberSerializer(many=True, read_only=True)
+    messages = ChatMessageSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = BatchChatRoom
+        fields = ('id', 'batch', 'created_at', 'members', 'messages')
+        read_only_fields = fields
+
+
+class ProviderVerifySerializer(serializers.Serializer):
+    """Input for admin approve/reject of a provider."""
+    action = serializers.ChoiceField(choices=['approve', 'reject'])
+    rejection_message = serializers.CharField(required=False, allow_blank=True)
+
+    def validate(self, data):
+        if data['action'] == 'reject' and not data.get('rejection_message', '').strip():
+            raise serializers.ValidationError({'rejection_message': 'A rejection message is required when rejecting.'})
+        return data
+
+
+class BatchPricingSerializer(serializers.Serializer):
+    """Input for provider to set unit price and savings on a batch."""
+    provider_unit_price = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0)
+    provider_savings = serializers.DecimalField(max_digits=10, decimal_places=2, min_value=0, required=False)
+
+
+class ProviderNotifySerializer(serializers.Serializer):
+    """Input for provider to send a custom notification to all batch participants."""
+    title = serializers.CharField(max_length=255)
+    body = serializers.CharField()

@@ -11,7 +11,11 @@ from django.conf import settings
 import logging
 from google.auth.transport import requests
 from google.oauth2 import id_token
-from .models import Customer, Provider, Product, Batch, BatchParticipant, Subscription, EmailVerificationCode
+from .models import (
+    Customer, Provider, Product, Batch, BatchParticipant, Subscription,
+    EmailVerificationCode, Notification, UserSettings, BatchChatRoom,
+    ChatMember, ChatMessage,
+)
 from .serializers import (
     CustomerSerializer, ProviderSerializer, ProviderRegisterSerializer,
     ProductSerializer, BatchSerializer, BatchCreateSerializer,
@@ -20,6 +24,9 @@ from .serializers import (
     OrderSerializer, OrderCreateSerializer, OrderStatusUpdateSerializer,
     JoinBatchSerializer, SendVerificationCodeSerializer, VerifyEmailCodeSerializer,
     RegisterWithVerificationSerializer, GoogleLoginSerializer,
+    NotificationSerializer, UserSettingsSerializer,
+    BatchChatRoomSerializer, ChatMessageSerializer,
+    ProviderVerifySerializer, BatchPricingSerializer, ProviderNotifySerializer,
 )
 
 
@@ -185,6 +192,9 @@ class BatchListCreate(APIView):
             image_url=image_url,
             expires_at=data.get('expires_at'),
         )
+        # Auto-create chat room and add creator as first member (Phase 8)
+        chat_room = BatchChatRoom.objects.create(batch=batch)
+        ChatMember.objects.create(room=chat_room, customer=request.user)
         logger.info('[BatchListCreate.post] created batch id=%s product=%s user=%s', batch.batch_id, batch.product_name, request.user.email)
         return Response(BatchSerializer(batch).data, status=status.HTTP_201_CREATED)
 
@@ -231,6 +241,10 @@ def _join_batch_for_customer(*, batch, customer, quantity_kg):
                 customer=customer,
                 quantity_requested=quantity_kg,
             )
+            # Auto-join the chat room when joining the batch (Phase 8)
+            chat_room = BatchChatRoom.objects.filter(batch=batch).first()
+            if chat_room:
+                ChatMember.objects.get_or_create(room=chat_room, customer=customer)
 
         refreshed_filled = (
             BatchParticipant.objects
@@ -239,10 +253,32 @@ def _join_batch_for_customer(*, batch, customer, quantity_kg):
             or 0
         )
         batch.filled_quantity = refreshed_filled
-        batch.status = 'filled' if refreshed_filled >= batch.total_quantity else 'open'
+        newly_filled = refreshed_filled >= batch.total_quantity
+        batch.status = 'filled' if newly_filled else 'open'
         batch.save(update_fields=['filled_quantity', 'status'])
 
+    # Auto-notify all participants when batch just became full (Phase 5)
+    if newly_filled:
+        _notify_batch_full(batch)
+
     return participant
+
+
+def _notify_batch_full(batch):
+    """Create a 'batch_full' notification for every participant in the batch."""
+    participants = BatchParticipant.objects.filter(batch=batch).select_related('customer')
+    notifications = [
+        Notification(
+            recipient=p.customer,
+            title='Batch is full!',
+            body=f'The batch for "{batch.product_name}" is now full and ready for confirmation.',
+            notification_type='batch_full',
+            related_batch=batch,
+        )
+        for p in participants
+    ]
+    Notification.objects.bulk_create(notifications)
+    logger.info('[_notify_batch_full] created %d notifications for batch=%s', len(notifications), batch.batch_id)
 
 
 class BatchJoinView(APIView):
@@ -843,3 +879,339 @@ class ProviderRegisterView(APIView):
         )
         logger.info('[ProviderRegisterView.post] created provider id=%s name=%s for user=%s', provider.provider_id, provider.business_name, request.user.email)
         return Response(ProviderSerializer(provider).data, status=status.HTTP_201_CREATED)
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 — Admin: verify / reject provider
+# ---------------------------------------------------------------------------
+
+class AdminProviderListView(APIView):
+    """
+    GET /api/admin/providers/?status=pending
+    List all providers, optionally filtered by status. Admin only.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        if not request.user.is_staff:
+            return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
+        qs = Provider.objects.all()
+        status_filter = request.query_params.get('status')
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return Response(ProviderSerializer(qs, many=True).data)
+
+
+class AdminProviderVerifyView(APIView):
+    """
+    POST /api/admin/providers/<provider_id>/verify/
+    Approve or reject a provider. Admin only.
+    Body: { "action": "approve" | "reject", "rejection_message": "..." }
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, provider_id):
+        if not request.user.is_staff:
+            return Response({'detail': 'Admin access required.'}, status=status.HTTP_403_FORBIDDEN)
+
+        provider = generics.get_object_or_404(Provider, provider_id=provider_id)
+        serializer = ProviderVerifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        if data['action'] == 'approve':
+            provider.status = 'verified'
+            provider.rejection_message = ''
+            provider.save(update_fields=['status', 'rejection_message'])
+            notif_type = 'provider_approved'
+            title = 'Provider profile approved!'
+            body = f'Congratulations! Your provider profile "{provider.business_name}" has been approved.'
+        else:
+            provider.status = 'rejected'
+            provider.rejection_message = data.get('rejection_message', '')
+            provider.save(update_fields=['status', 'rejection_message'])
+            notif_type = 'provider_rejected'
+            title = 'Provider profile rejected'
+            body = f'Your provider profile "{provider.business_name}" was rejected. Reason: {provider.rejection_message}'
+
+        # Notify the provider owner
+        try:
+            owner = Customer.objects.get(email=provider.owner_email)
+            Notification.objects.create(
+                recipient=owner,
+                title=title,
+                body=body,
+                notification_type=notif_type,
+            )
+        except Customer.DoesNotExist:
+            pass
+
+        logger.info('[AdminProviderVerifyView] provider=%s action=%s by admin=%s', provider_id, data['action'], request.user.email)
+        return Response(ProviderSerializer(provider).data, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 — Batch edit / delete with ownership checks
+# ---------------------------------------------------------------------------
+
+class BatchEditDeleteView(APIView):
+    """
+    PATCH /api/batches/<batch_id>/edit/
+    DELETE /api/batches/<batch_id>/edit/
+    Only the creator, assigned provider owner, or admin may modify/delete.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_batch_and_check_permission(self, request, batch_id):
+        batch = generics.get_object_or_404(Batch, batch_id=batch_id)
+        user = request.user
+        is_creator = batch.creator_id == user.customer_id
+        is_provider_owner = batch.provider and batch.provider.owner_email == user.email
+        if not (is_creator or is_provider_owner or user.is_staff):
+            return None, Response({'detail': 'Permission denied.'}, status=status.HTTP_403_FORBIDDEN)
+        return batch, None
+
+    def patch(self, request, batch_id):
+        batch, err = self._get_batch_and_check_permission(request, batch_id)
+        if err:
+            return err
+
+        allowed_fields = {'product_name', 'total_quantity', 'location_name', 'notes', 'expires_at', 'status'}
+        update_fields = []
+        for field in allowed_fields:
+            if field in request.data:
+                setattr(batch, field, request.data[field])
+                update_fields.append(field)
+
+        if update_fields:
+            batch.save(update_fields=update_fields)
+        return Response(BatchSerializer(batch).data, status=status.HTTP_200_OK)
+
+    def delete(self, request, batch_id):
+        batch, err = self._get_batch_and_check_permission(request, batch_id)
+        if err:
+            return err
+        batch.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 — Provider sets pricing on a batch
+# ---------------------------------------------------------------------------
+
+class BatchPricingView(APIView):
+    """
+    PATCH /api/batches/<batch_id>/pricing/
+    Only the provider assigned to the batch may set pricing.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, batch_id):
+        batch = generics.get_object_or_404(Batch, batch_id=batch_id)
+        if not batch.provider or batch.provider.owner_email != request.user.email:
+            return Response({'detail': 'Only the assigned provider may set pricing.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = BatchPricingSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        batch.provider_unit_price = data['provider_unit_price']
+        if 'provider_savings' in data:
+            batch.provider_savings = data['provider_savings']
+        batch.save(update_fields=['provider_unit_price', 'provider_savings'])
+        return Response(BatchSerializer(batch).data, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4 — Provider sends notification to all batch participants
+# ---------------------------------------------------------------------------
+
+class ProviderNotifyParticipantsView(APIView):
+    """
+    POST /api/batches/<batch_id>/notify/
+    Provider-only: send a custom notification to all batch participants.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, batch_id):
+        batch = generics.get_object_or_404(Batch, batch_id=batch_id)
+        if not batch.provider or batch.provider.owner_email != request.user.email:
+            return Response({'detail': 'Only the assigned provider may send notifications.'}, status=status.HTTP_403_FORBIDDEN)
+
+        serializer = ProviderNotifySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+
+        participants = BatchParticipant.objects.filter(batch=batch).select_related('customer')
+        notifications = [
+            Notification(
+                recipient=p.customer,
+                title=data['title'],
+                body=data['body'],
+                notification_type='provider_message',
+                related_batch=batch,
+            )
+            for p in participants
+        ]
+        Notification.objects.bulk_create(notifications)
+        logger.info('[ProviderNotifyParticipantsView] sent %d notifications for batch=%s', len(notifications), batch_id)
+        return Response({'detail': f'Notification sent to {len(notifications)} participant(s).'}, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Phase 6 — User settings (language, theme, notification prefs)
+# ---------------------------------------------------------------------------
+
+class UserSettingsView(APIView):
+    """
+    GET  /api/settings/   — return current settings (creates defaults if none)
+    PATCH /api/settings/  — update one or more settings fields
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_or_create_settings(self, user):
+        obj, _ = UserSettings.objects.get_or_create(customer=user)
+        return obj
+
+    def get(self, request):
+        settings_obj = self._get_or_create_settings(request.user)
+        return Response(UserSettingsSerializer(settings_obj).data, status=status.HTTP_200_OK)
+
+    def patch(self, request):
+        settings_obj = self._get_or_create_settings(request.user)
+        serializer = UserSettingsSerializer(settings_obj, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Follow / unfollow provider; list followed providers
+# ---------------------------------------------------------------------------
+
+class FollowProviderView(APIView):
+    """
+    POST   /api/providers/<provider_id>/follow/   — follow a provider
+    DELETE /api/providers/<provider_id>/follow/   — unfollow a provider
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, provider_id):
+        provider = generics.get_object_or_404(Provider, provider_id=provider_id)
+        _, created = Subscription.objects.get_or_create(customer=request.user, provider=provider)
+        if created:
+            provider.subscriber_count = Subscription.objects.filter(provider=provider).count()
+            provider.save(update_fields=['subscriber_count'])
+        return Response({'detail': 'Following.' if created else 'Already following.'}, status=status.HTTP_200_OK)
+
+    def delete(self, request, provider_id):
+        provider = generics.get_object_or_404(Provider, provider_id=provider_id)
+        deleted, _ = Subscription.objects.filter(customer=request.user, provider=provider).delete()
+        if deleted:
+            provider.subscriber_count = Subscription.objects.filter(provider=provider).count()
+            provider.save(update_fields=['subscriber_count'])
+            return Response({'detail': 'Unfollowed.'}, status=status.HTTP_200_OK)
+        return Response({'detail': 'Not following.'}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class FollowedProvidersView(APIView):
+    """
+    GET /api/providers/followed/
+    Returns only the providers the authenticated user follows.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        provider_ids = Subscription.objects.filter(
+            customer=request.user
+        ).values_list('provider_id', flat=True)
+        providers = Provider.objects.filter(provider_id__in=provider_ids)
+        return Response(ProviderSerializer(providers, many=True).data, status=status.HTTP_200_OK)
+
+
+# ---------------------------------------------------------------------------
+# Phase 8 — Batch chat room: get room info, send/list messages
+# ---------------------------------------------------------------------------
+
+class BatchChatRoomView(APIView):
+    """
+    GET /api/batches/<batch_id>/chat/
+    Returns the chat room for a batch (only for participants or the creator).
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _check_membership(self, batch, user):
+        is_creator = batch.creator_id == user.customer_id
+        is_participant = BatchParticipant.objects.filter(batch=batch, customer=user).exists()
+        is_provider = batch.provider and batch.provider.owner_email == user.email
+        return is_creator or is_participant or is_provider or user.is_staff
+
+    def get(self, request, batch_id):
+        batch = generics.get_object_or_404(Batch, batch_id=batch_id)
+        if not self._check_membership(batch, request.user):
+            return Response({'detail': 'You are not a member of this batch.'}, status=status.HTTP_403_FORBIDDEN)
+        chat_room, _ = BatchChatRoom.objects.get_or_create(batch=batch)
+        ChatMember.objects.get_or_create(room=chat_room, customer=request.user)
+        return Response(BatchChatRoomSerializer(chat_room).data, status=status.HTTP_200_OK)
+
+
+class ChatMessageListCreate(APIView):
+    """
+    GET  /api/batches/<batch_id>/chat/messages/  — list messages
+    POST /api/batches/<batch_id>/chat/messages/  — send a message
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def _get_room_and_check(self, request, batch_id):
+        batch = generics.get_object_or_404(Batch, batch_id=batch_id)
+        chat_room = generics.get_object_or_404(BatchChatRoom, batch=batch)
+        is_member = ChatMember.objects.filter(room=chat_room, customer=request.user).exists()
+        is_staff = request.user.is_staff
+        if not is_member and not is_staff:
+            return None, Response({'detail': 'You are not a member of this chat.'}, status=status.HTTP_403_FORBIDDEN)
+        return chat_room, None
+
+    def get(self, request, batch_id):
+        chat_room, err = self._get_room_and_check(request, batch_id)
+        if err:
+            return err
+        messages = chat_room.messages.select_related('sender').all()
+        return Response(ChatMessageSerializer(messages, many=True).data, status=status.HTTP_200_OK)
+
+    def post(self, request, batch_id):
+        chat_room, err = self._get_room_and_check(request, batch_id)
+        if err:
+            return err
+        content = request.data.get('content', '').strip()
+        if not content:
+            return Response({'content': 'Message content cannot be empty.'}, status=status.HTTP_400_BAD_REQUEST)
+        message = ChatMessage.objects.create(room=chat_room, sender=request.user, content=content)
+        return Response(ChatMessageSerializer(message).data, status=status.HTTP_201_CREATED)
+
+
+# ---------------------------------------------------------------------------
+# Notification list + mark-read
+# ---------------------------------------------------------------------------
+
+class NotificationListView(APIView):
+    """
+    GET /api/notifications/   — list current user's notifications
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        notifications = Notification.objects.filter(recipient=request.user)
+        return Response(NotificationSerializer(notifications, many=True).data, status=status.HTTP_200_OK)
+
+
+class NotificationDetailView(APIView):
+    """
+    PATCH /api/notifications/<id>/   — mark as read
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def patch(self, request, notif_id):
+        notif = generics.get_object_or_404(Notification, id=notif_id, recipient=request.user)
+        notif.is_read = True
+        notif.save(update_fields=['is_read'])
+        return Response(NotificationSerializer(notif).data, status=status.HTTP_200_OK)

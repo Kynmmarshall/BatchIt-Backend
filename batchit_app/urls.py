@@ -64,4 +64,26 @@ urlpatterns = [
     # Subscription URLs
     path('subscriptions/', views.SubscriptionListCreate.as_view(), name='subscription-list-create'),
     path('subscriptions/<uuid:subscription_id>/', views.SubscriptionDetail.as_view(), name='subscription-detail'),
+
+    # Batch extended — edit/delete, pricing, notify participants, chat
+    path('batches/<uuid:batch_id>/edit/', views.BatchEditDeleteView.as_view(), name='batch-edit-delete'),
+    path('batches/<uuid:batch_id>/pricing/', views.BatchPricingView.as_view(), name='batch-pricing'),
+    path('batches/<uuid:batch_id>/notify/', views.ProviderNotifyParticipantsView.as_view(), name='batch-notify'),
+    path('batches/<uuid:batch_id>/chat/', views.BatchChatRoomView.as_view(), name='batch-chat-room'),
+    path('batches/<uuid:batch_id>/chat/messages/', views.ChatMessageListCreate.as_view(), name='batch-chat-messages'),
+
+    # Admin — provider verification
+    path('admin/providers/', views.AdminProviderListView.as_view(), name='admin-provider-list'),
+    path('admin/providers/<uuid:provider_id>/verify/', views.AdminProviderVerifyView.as_view(), name='admin-provider-verify'),
+
+    # Provider — follow / unfollow / list followed
+    path('providers/followed/', views.FollowedProvidersView.as_view(), name='provider-followed'),
+    path('providers/<uuid:provider_id>/follow/', views.FollowProviderView.as_view(), name='provider-follow'),
+
+    # Notifications
+    path('notifications/', views.NotificationListView.as_view(), name='notification-list'),
+    path('notifications/<uuid:notif_id>/', views.NotificationDetailView.as_view(), name='notification-detail'),
+
+    # User settings
+    path('settings/', views.UserSettingsView.as_view(), name='user-settings'),
 ]
