@@ -203,6 +203,7 @@ class Notification(models.Model):
         ('batch_created', 'Batch Created'),
         ('batch_joined', 'Batch Joined'),
         ('batch_full', 'Batch Full'),
+        ('provider_review', 'Provider Review'),
         ('provider_approved', 'Provider Approved'),
         ('provider_rejected', 'Provider Rejected'),
         ('provider_message', 'Provider Message'),

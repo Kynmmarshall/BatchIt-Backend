@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.core.mail import send_mail
 from django.conf import settings
 from django.http import FileResponse, Http404
@@ -985,7 +985,17 @@ class ProviderMyProfileView(APIView):
             return Response({'detail': 'No changes provided.'}, status=status.HTTP_400_BAD_REQUEST)
 
         provider.save(update_fields=list(set(update_fields)))
+        provider.status = 'pending'
+        provider.verified = False
+        provider.rejection_message = ''
+        provider.save(update_fields=['status', 'verified', 'rejection_message'])
         logger.info('[ProviderMyProfileView.patch] updated provider=%s user=%s fields=%s', provider.provider_id, request.user.email, sorted(set(update_fields)))
+
+        _notify_admins_provider_review(
+            provider=provider,
+            action_label='updated',
+            actor_email=request.user.email,
+        )
         return Response(ProviderSerializer(provider, context={'request': request}).data, status=status.HTTP_200_OK)
 
 
@@ -1106,7 +1116,38 @@ class ProviderRegisterView(APIView):
             logger.info('[ProviderRegisterView.post] no documents uploaded for provider=%s', provider.provider_id)
 
         logger.info('[ProviderRegisterView.post] created provider id=%s name=%s for user=%s', provider.provider_id, provider.business_name, request.user.email)
+
+        _notify_admins_provider_review(
+            provider=provider,
+            action_label='submitted',
+            actor_email=request.user.email,
+        )
         return Response(ProviderSerializer(provider, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+
+def _notify_admins_provider_review(*, provider, action_label, actor_email):
+    """
+    Notify all staff/superuser accounts that a provider profile needs review.
+    """
+    admin_ids = list(
+        Customer.objects.filter(Q(is_staff=True) | Q(is_superuser=True))
+        .values_list('customer_id', flat=True)
+    )
+    if not admin_ids:
+        return
+
+    title = f'Provider profile {action_label} for review'
+    body = f'{provider.business_name} was {action_label} by {actor_email} and is waiting for admin review.'
+
+    Notification.objects.bulk_create([
+        Notification(
+            recipient_id=admin_id,
+            title=title,
+            body=body,
+            notification_type='provider_review',
+        )
+        for admin_id in admin_ids
+    ])
 
 
 class ProviderDocumentDownloadView(APIView):
