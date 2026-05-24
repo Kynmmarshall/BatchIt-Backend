@@ -202,6 +202,7 @@ class BatchListCreate(APIView):
                 product_name=data['product_name'],
                 total_quantity=data['total_quantity'],
                 filled_quantity=0,
+                unit=data.get('unit', 'kg'),
                 status='open',
                 location_name=data.get('location', ''),
                 notes=data.get('notes', ''),
