@@ -111,10 +111,18 @@ class BatchListCreate(APIView):
         status_filter = request.query_params.get('status')
         location_filter = request.query_params.get('location')
         creator_filter = request.query_params.get('creator')
+        participant_filter = request.query_params.get('participant')
 
         if creator_filter == 'me' and request.user.is_authenticated:
             qs = qs.filter(creator=request.user)
             logger.info('[BatchListCreate.get] creator=me filter for user=%s', request.user.email)
+        elif participant_filter == 'me' and request.user.is_authenticated:
+            # Batches the current user has joined (has a BatchParticipant record for).
+            joined_ids = BatchParticipant.objects.filter(
+                customer=request.user
+            ).values_list('batch_id', flat=True)
+            qs = qs.filter(batch_id__in=joined_ids)
+            logger.info('[BatchListCreate.get] participant=me filter for user=%s, found %d batches', request.user.email, qs.count())
         elif status_filter:
             qs = qs.filter(status=status_filter)
             logger.debug('[BatchListCreate.get] status filter=%s', status_filter)
