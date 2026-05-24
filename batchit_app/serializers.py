@@ -11,6 +11,7 @@ import re
 class BatchSerializer(serializers.ModelSerializer):
     """Frontend-facing batch serializer with renamed fields."""
     id = serializers.UUIDField(source='batch_id', read_only=True)
+    creator_id = serializers.UUIDField(source='creator.customer_id', read_only=True)
     bulk_size_kg = serializers.FloatField(source='total_quantity', read_only=True)
     current_quantity_kg = serializers.FloatField(source='filled_quantity', read_only=True)
     hub_name = serializers.SerializerMethodField()
@@ -26,6 +27,7 @@ class BatchSerializer(serializers.ModelSerializer):
         model = Batch
         fields = (
             'id',
+            'creator_id',
             'product_name',
             'bulk_size_kg',
             'current_quantity_kg',
