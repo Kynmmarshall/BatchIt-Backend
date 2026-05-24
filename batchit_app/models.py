@@ -201,6 +201,7 @@ class Notification(models.Model):
     """
     NOTIFICATION_TYPES = [
         ('batch_created', 'Batch Created'),
+        ('batch_joined', 'Batch Joined'),
         ('batch_full', 'Batch Full'),
         ('provider_approved', 'Provider Approved'),
         ('provider_rejected', 'Provider Rejected'),

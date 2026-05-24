@@ -301,11 +301,32 @@ def _join_batch_for_customer(*, batch, customer, quantity_kg):
         batch.status = 'filled' if newly_filled else 'open'
         batch.save(update_fields=['filled_quantity', 'status'])
 
+    if batch.creator_id and batch.creator_id != customer.id:
+        _notify_batch_joined(batch=batch, participant=participant, customer=customer)
+
     # Auto-notify all participants when batch just became full (Phase 5)
     if newly_filled:
         _notify_batch_full(batch)
 
     return participant
+
+
+def _notify_batch_joined(*, batch, participant, customer):
+    """
+    Notify the batch creator that someone joined or increased their order.
+    """
+    creator = batch.creator
+    if not creator:
+        return
+
+    joined_label = customer.get_full_name().strip() or customer.email
+    Notification.objects.create(
+        recipient=creator,
+        title=f'New join on {batch.product_name}',
+        body=f'{joined_label} joined your batch for {batch.product_name} with {participant.quantity_requested} kg.',
+        notification_type='batch_joined',
+        related_batch=batch,
+    )
 
 
 def _notify_batch_full(batch):
