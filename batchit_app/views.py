@@ -302,7 +302,7 @@ def _join_batch_for_customer(*, batch, customer, quantity_kg):
         batch.status = 'filled' if newly_filled else 'open'
         batch.save(update_fields=['filled_quantity', 'status'])
 
-    if batch.creator_id and batch.creator_id != customer.id:
+    if batch.creator_id and batch.creator_id != customer.customer_id:
         _notify_batch_joined(batch=batch, participant=participant, customer=customer)
 
     # Auto-notify all participants when batch just became full (Phase 5)
