@@ -137,6 +137,8 @@ SIMPLE_JWT = {
     'BLACKLIST_AFTER_ROTATION': False,
     'ALGORITHM': 'HS256',
     'SIGNING_KEY': SECRET_KEY,
+    # Our custom user model uses `customer_id` as the PK field name
+    'USER_ID_FIELD': 'customer_id',
 }
 
 # Swagger/OpenAPI Settings
