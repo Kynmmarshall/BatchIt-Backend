@@ -1316,6 +1316,21 @@ class BatchEditDeleteView(APIView):
                 setattr(batch, field, request.data[field])
                 update_fields.append(field)
 
+        image_file = request.FILES.get('image')
+        if image_file:
+            upload_dir = os.path.join(settings.MEDIA_ROOT, 'batch_images')
+            os.makedirs(upload_dir, exist_ok=True)
+            ext = os.path.splitext(image_file.name)[1]
+            filename = f'{batch.batch_id}{ext}'
+            filepath = os.path.join(upload_dir, filename)
+            with open(filepath, 'wb+') as f:
+                for chunk in image_file.chunks():
+                    f.write(chunk)
+            batch.image_url = request.build_absolute_uri(
+                settings.MEDIA_URL + f'batch_images/{filename}'
+            )
+            update_fields.append('image_url')
+
         if update_fields:
             batch.save(update_fields=update_fields)
         return Response(BatchSerializer(batch).data, status=status.HTTP_200_OK)
