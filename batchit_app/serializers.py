@@ -11,6 +11,7 @@ import re
 class BatchSerializer(serializers.ModelSerializer):
     """Frontend-facing batch serializer with renamed fields."""
     id = serializers.UUIDField(source='batch_id', read_only=True)
+    creator_id = serializers.UUIDField(source='creator.customer_id', read_only=True)
     bulk_size_kg = serializers.FloatField(source='total_quantity', read_only=True)
     current_quantity_kg = serializers.FloatField(source='filled_quantity', read_only=True)
     hub_name = serializers.SerializerMethodField()
@@ -26,9 +27,11 @@ class BatchSerializer(serializers.ModelSerializer):
         model = Batch
         fields = (
             'id',
+            'creator_id',
             'product_name',
             'bulk_size_kg',
             'current_quantity_kg',
+            'unit',
             'location_name',
             'hub_name',
             'provider_id',
@@ -47,6 +50,11 @@ class BatchCreateSerializer(serializers.Serializer):
     """Input serializer for creating a new batch. Accepts field names as sent by the frontend."""
     product_name = serializers.CharField(max_length=255)
     total_quantity = serializers.FloatField(min_value=0.01)
+    unit = serializers.ChoiceField(
+        choices=['kg', 'g', 'L', 'mL', 'units', 'boxes'],
+        required=False,
+        default='kg',
+    )
     location = serializers.CharField(max_length=255, required=False, allow_blank=True)
     provider_id = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     notes = serializers.CharField(required=False, allow_blank=True)

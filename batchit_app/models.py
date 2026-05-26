@@ -105,6 +105,14 @@ class Batch(models.Model):
         ('fulfilled', 'Fulfilled'),
         ('expired', 'Expired'),
     ]
+    UNIT_CHOICES = [
+        ('kg', 'Kilograms'),
+        ('g', 'Grams'),
+        ('L', 'Litres'),
+        ('mL', 'Millilitres'),
+        ('units', 'Units/Pieces'),
+        ('boxes', 'Boxes'),
+    ]
     batch_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     product = models.ForeignKey(Product, on_delete=models.SET_NULL, null=True, blank=True, related_name='batches')
     provider = models.ForeignKey(Provider, on_delete=models.SET_NULL, null=True, blank=True, related_name='batches')
@@ -112,6 +120,7 @@ class Batch(models.Model):
     product_name = models.CharField(max_length=255, blank=True, default='')
     total_quantity = models.FloatField(default=0)
     filled_quantity = models.FloatField(default=0)
+    unit = models.CharField(max_length=10, choices=UNIT_CHOICES, default='kg')
     location_name = models.CharField(max_length=255, blank=True, default='')
     image_url = models.URLField(blank=True, null=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
@@ -133,7 +142,7 @@ class BatchParticipant(models.Model):
     participant_id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     batch = models.ForeignKey(Batch, on_delete=models.CASCADE, related_name='participants')
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, related_name='participating_batches')
-    quantity_requested = models.PositiveIntegerField() # How many units this customer wants
+    quantity_requested = models.FloatField()  # How many units (in the batch's unit) this customer wants
     joined_at = models.DateTimeField(auto_now_add=True)
     status = models.CharField(max_length=20, choices=[
         ('pending', 'Pending'),
@@ -201,7 +210,9 @@ class Notification(models.Model):
     """
     NOTIFICATION_TYPES = [
         ('batch_created', 'Batch Created'),
+        ('batch_joined', 'Batch Joined'),
         ('batch_full', 'Batch Full'),
+        ('provider_review', 'Provider Review'),
         ('provider_approved', 'Provider Approved'),
         ('provider_rejected', 'Provider Rejected'),
         ('provider_message', 'Provider Message'),

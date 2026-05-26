@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.authtoken.models import Token
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.core.mail import send_mail
 from django.conf import settings
 from django.http import FileResponse, Http404
@@ -111,10 +111,18 @@ class BatchListCreate(APIView):
         status_filter = request.query_params.get('status')
         location_filter = request.query_params.get('location')
         creator_filter = request.query_params.get('creator')
+        participant_filter = request.query_params.get('participant')
 
         if creator_filter == 'me' and request.user.is_authenticated:
             qs = qs.filter(creator=request.user)
             logger.info('[BatchListCreate.get] creator=me filter for user=%s', request.user.email)
+        elif participant_filter == 'me' and request.user.is_authenticated:
+            # Batches the current user has joined (has a BatchParticipant record for).
+            joined_ids = BatchParticipant.objects.filter(
+                customer=request.user
+            ).values_list('batch_id', flat=True)
+            qs = qs.filter(batch_id__in=joined_ids)
+            logger.info('[BatchListCreate.get] participant=me filter for user=%s, found %d batches', request.user.email, qs.count())
         elif status_filter:
             qs = qs.filter(status=status_filter)
             logger.debug('[BatchListCreate.get] status filter=%s', status_filter)
@@ -194,6 +202,8 @@ class BatchListCreate(APIView):
                 product_name=data['product_name'],
                 total_quantity=data['total_quantity'],
                 filled_quantity=0,
+                unit=data.get('unit', 'kg'),
+                status='open',
                 location_name=data.get('location', ''),
                 notes=data.get('notes', ''),
                 image_url=image_url,
@@ -293,11 +303,32 @@ def _join_batch_for_customer(*, batch, customer, quantity_kg):
         batch.status = 'filled' if newly_filled else 'open'
         batch.save(update_fields=['filled_quantity', 'status'])
 
+    if batch.creator_id and batch.creator_id != customer.customer_id:
+        _notify_batch_joined(batch=batch, participant=participant, customer=customer)
+
     # Auto-notify all participants when batch just became full (Phase 5)
     if newly_filled:
         _notify_batch_full(batch)
 
     return participant
+
+
+def _notify_batch_joined(*, batch, participant, customer):
+    """
+    Notify the batch creator that someone joined or increased their order.
+    """
+    creator = batch.creator
+    if not creator:
+        return
+
+    joined_label = customer.get_full_name().strip() or customer.email
+    Notification.objects.create(
+        recipient=creator,
+        title=f'New join on {batch.product_name}',
+        body=f'{joined_label} joined your batch for {batch.product_name} with {participant.quantity_requested} kg.',
+        notification_type='batch_joined',
+        related_batch=batch,
+    )
 
 
 def _notify_batch_full(batch):
@@ -956,7 +987,17 @@ class ProviderMyProfileView(APIView):
             return Response({'detail': 'No changes provided.'}, status=status.HTTP_400_BAD_REQUEST)
 
         provider.save(update_fields=list(set(update_fields)))
+        provider.status = 'pending'
+        provider.verified = False
+        provider.rejection_message = ''
+        provider.save(update_fields=['status', 'verified', 'rejection_message'])
         logger.info('[ProviderMyProfileView.patch] updated provider=%s user=%s fields=%s', provider.provider_id, request.user.email, sorted(set(update_fields)))
+
+        _notify_admins_provider_review(
+            provider=provider,
+            action_label='updated',
+            actor_email=request.user.email,
+        )
         return Response(ProviderSerializer(provider, context={'request': request}).data, status=status.HTTP_200_OK)
 
 
@@ -1077,7 +1118,38 @@ class ProviderRegisterView(APIView):
             logger.info('[ProviderRegisterView.post] no documents uploaded for provider=%s', provider.provider_id)
 
         logger.info('[ProviderRegisterView.post] created provider id=%s name=%s for user=%s', provider.provider_id, provider.business_name, request.user.email)
+
+        _notify_admins_provider_review(
+            provider=provider,
+            action_label='submitted',
+            actor_email=request.user.email,
+        )
         return Response(ProviderSerializer(provider, context={'request': request}).data, status=status.HTTP_201_CREATED)
+
+
+def _notify_admins_provider_review(*, provider, action_label, actor_email):
+    """
+    Notify all staff/superuser accounts that a provider profile needs review.
+    """
+    admin_ids = list(
+        Customer.objects.filter(Q(is_staff=True) | Q(is_superuser=True))
+        .values_list('customer_id', flat=True)
+    )
+    if not admin_ids:
+        return
+
+    title = f'Provider profile {action_label} for review'
+    body = f'{provider.business_name} was {action_label} by {actor_email} and is waiting for admin review.'
+
+    Notification.objects.bulk_create([
+        Notification(
+            recipient_id=admin_id,
+            title=title,
+            body=body,
+            notification_type='provider_review',
+        )
+        for admin_id in admin_ids
+    ])
 
 
 class ProviderDocumentDownloadView(APIView):
