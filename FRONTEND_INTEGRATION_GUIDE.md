@@ -68,7 +68,9 @@ All service layers now make real HTTP calls with fallback to mock data on error 
 - **Response** (200):
   ```json
   {
-    "token": "abc123token...",
+    "token": "abc123token...",            // legacy DRF Token (kept for migration)
+    "access": "<jwt-access-token>",       // JWT access token (preferred)
+    "refresh": "<jwt-refresh-token>",     // JWT refresh token
     "user": {
       "id": "user-uuid",
       "email": "user@example.com",
@@ -104,7 +106,7 @@ All service layers now make real HTTP calls with fallback to mock data on error 
   ```
 
 **GET /api/auth/me/**
-- **Headers**: `Authorization: Token <token>`
+ - **Headers**: `Authorization: Bearer <access>` (preferred) or `Authorization: Token <token>` (legacy)
 - **Response** (200):
   ```json
   {
@@ -117,19 +119,19 @@ All service layers now make real HTTP calls with fallback to mock data on error 
 - **Error Response** (401): `{"detail": "Invalid token"}`
 
 **POST /api/auth/logout/**
-- **Headers**: `Authorization: Token <token>`
+ - **Headers**: `Authorization: Bearer <access>` or `Authorization: Token <token>`
 - **Request Body**: `{}`
 - **Response** (200): `{"detail": "Successfully logged out"}`
 
 **POST /api/auth/refresh/**
-- **Headers**: `Authorization: Token <token>`
-- **Request Body**: `{}`
-- **Response** (200):
-  ```json
-  {
-    "token": "new-token-string"
-  }
-  ```
+ - **Legacy endpoint**: This endpoint exists for older clients that use DRF TokenAuthentication. It expects the legacy `Authorization: Token <token>` header and returns a new DRF token.
+
+ - **JWT refresh (new)**: The recommended flow is to use the SimpleJWT endpoints:
+
+   - `POST /api/token/` — exchange credentials for JWT pair (access + refresh). Body: `{ "email": "...", "password": "..." }`.
+   - `POST /api/token/refresh/` — refresh access token using `{ "refresh": "<refresh-token>" }`.
+
+   The backend also provides `/api/auth/exchange-token/` which accepts a legacy `Authorization: Token <token>` header in a POST request and returns `{"access": "...", "refresh": "..."}` to help seamless migration.
 
 ### 2. Batch Endpoints
 
