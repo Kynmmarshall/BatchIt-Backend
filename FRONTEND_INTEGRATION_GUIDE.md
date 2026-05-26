@@ -14,7 +14,8 @@ The Flutter frontend has been updated to communicate with the Django REST Framew
 - **File**: [lib/services/api_client.dart](../lib/services/api_client.dart)
 - **Purpose**: Singleton HTTP client that handles all requests, token management, and error handling
 - **Features**:
-  - Automatic token injection in `Authorization: Token <token>` header
+  - Automatic token injection in `Authorization: Bearer <access>` header for JWT
+  - One-time legacy token exchange support for older installs via `/api/auth/exchange-token/`
   - Base URL: `http://127.0.0.1:8000/api`
   - Request timeout: 30 seconds
   - JSON serialization/deserialization
@@ -106,7 +107,7 @@ All service layers now make real HTTP calls with fallback to mock data on error 
   ```
 
 **GET /api/auth/me/**
- - **Headers**: `Authorization: Bearer <access>` (preferred) or `Authorization: Token <token>` (legacy)
+ - **Headers**: `Authorization: Bearer <access>`
 - **Response** (200):
   ```json
   {
@@ -119,19 +120,17 @@ All service layers now make real HTTP calls with fallback to mock data on error 
 - **Error Response** (401): `{"detail": "Invalid token"}`
 
 **POST /api/auth/logout/**
- - **Headers**: `Authorization: Bearer <access>` or `Authorization: Token <token>`
+ - **Headers**: `Authorization: Bearer <access>`
 - **Request Body**: `{}`
 - **Response** (200): `{"detail": "Successfully logged out"}`
 
 **POST /api/auth/refresh/**
- - **Legacy endpoint**: This endpoint exists for older clients that use DRF TokenAuthentication. It expects the legacy `Authorization: Token <token>` header and returns a new DRF token.
-
- - **JWT refresh (new)**: The recommended flow is to use the SimpleJWT endpoints:
+ - **JWT refresh**: The recommended flow is to use the SimpleJWT endpoints:
 
    - `POST /api/token/` — exchange credentials for JWT pair (access + refresh). Body: `{ "email": "...", "password": "..." }`.
    - `POST /api/token/refresh/` — refresh access token using `{ "refresh": "<refresh-token>" }`.
 
-   The backend also provides `/api/auth/exchange-token/` which accepts a legacy `Authorization: Token <token>` header in a POST request and returns `{"access": "...", "refresh": "..."}` to help seamless migration.
+  The backend also provides `/api/auth/exchange-token/` which accepts a legacy `Authorization: Token <token>` header in a POST request and returns `{"access": "...", "refresh": "..."}` to help seamless migration.
 
 ### 2. Batch Endpoints
 
@@ -395,4 +394,4 @@ Frontend services map backend fields to UI models:
 - Frontend Services: `lib/services/`
 - Frontend Models: `lib/models/`
 - Django REST Framework Docs: https://www.django-rest-framework.org/
-- Token Authentication: https://www.django-rest-framework.org/api-guide/authentication/#tokenauthentication
+- SimpleJWT: https://django-rest-framework-simplejwt.readthedocs.io/

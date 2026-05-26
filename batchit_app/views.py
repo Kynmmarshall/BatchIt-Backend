@@ -756,11 +756,8 @@ class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        try:
-            request.user.auth_token.delete()
-            return Response({'detail': 'Logged out successfully.'}, status=status.HTTP_200_OK)
-        except Exception as e:
-            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        # JWT logout is handled client-side unless refresh token blacklisting is enabled.
+        return Response({'detail': 'Logged out successfully.'}, status=status.HTTP_200_OK)
 
 
 class MeView(APIView):
@@ -868,14 +865,8 @@ class RefreshTokenView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        try:
-            request.user.auth_token.delete()
-        except Exception:
-            pass
-        token = Token.objects.create(user=request.user)
-        # Also issue JWT pair to aid migration
         jwt_refresh = RefreshToken.for_user(request.user)
-        return Response({'token': token.key, 'access': str(jwt_refresh.access_token), 'refresh': str(jwt_refresh)}, status=status.HTTP_200_OK)
+        return Response({'access': str(jwt_refresh.access_token), 'refresh': str(jwt_refresh)}, status=status.HTTP_200_OK)
 
 
 class UpdateProfileView(APIView):
