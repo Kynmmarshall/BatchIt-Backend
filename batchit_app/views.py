@@ -886,7 +886,7 @@ class UpdateProfileView(APIView):
         user.first_name = first_name
         user.last_name = last_name
 
-        photo = request.FILES.get('photo')
+        photo = request.FILES.get('photo') or request.FILES.get('profile_photo')
         if photo:
             upload_dir = os.path.join(settings.MEDIA_ROOT, 'profile_photos')
             os.makedirs(upload_dir, exist_ok=True)
