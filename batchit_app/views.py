@@ -3,6 +3,7 @@ from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.authtoken.models import Token
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q, Sum
@@ -711,9 +712,13 @@ class LoginView(APIView):
         if serializer.is_valid():
             user = serializer.validated_data['user']
             token, created = Token.objects.get_or_create(user=user)
+            # Issue JWT pair as well for migrating clients
+            jwt_refresh = RefreshToken.for_user(user)
             logger.info('Successful login for user: %s', user.email)
             return Response({
                 'token': token.key,
+                'access': str(jwt_refresh.access_token),
+                'refresh': str(jwt_refresh),
                 'user': AuthDetailSerializer(user).data,
             }, status=status.HTTP_200_OK)
         logger.warning('Failed login attempt: %s; request email: %s', serializer.errors, request.data.get('email', 'N/A'))
@@ -733,8 +738,11 @@ class RegisterView(APIView):
         if serializer.is_valid():
             user = serializer.save()
             token, created = Token.objects.get_or_create(user=user)
+            jwt_refresh = RefreshToken.for_user(user)
             return Response({
                 'token': token.key,
+                'access': str(jwt_refresh.access_token),
+                'refresh': str(jwt_refresh),
                 'user': AuthDetailSerializer(user).data,
             }, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -828,8 +836,11 @@ class GoogleLoginView(APIView):
             # Generate or get auth token
             token, _ = Token.objects.get_or_create(user=user)
 
+            jwt_refresh = RefreshToken.for_user(user)
             return Response({
                 'token': token.key,
+                'access': str(jwt_refresh.access_token),
+                'refresh': str(jwt_refresh),
                 'user': AuthDetailSerializer(user).data,
             }, status=status.HTTP_200_OK)
 
@@ -862,7 +873,9 @@ class RefreshTokenView(APIView):
         except Exception:
             pass
         token = Token.objects.create(user=request.user)
-        return Response({'token': token.key}, status=status.HTTP_200_OK)
+        # Also issue JWT pair to aid migration
+        jwt_refresh = RefreshToken.for_user(request.user)
+        return Response({'token': token.key, 'access': str(jwt_refresh.access_token), 'refresh': str(jwt_refresh)}, status=status.HTTP_200_OK)
 
 
 class UpdateProfileView(APIView):
@@ -898,6 +911,29 @@ class UpdateProfileView(APIView):
 
         user.save(update_fields=['first_name', 'last_name', 'profile_photo_url'])
         return Response(AuthDetailSerializer(user).data, status=status.HTTP_200_OK)
+
+
+class ExchangeTokenView(APIView):
+    """
+    POST /api/auth/exchange-token/
+    Accepts legacy Token auth (via Authorization: Token <token>) and returns a JWT pair for the same user.
+    This eases migration from TokenAuthentication to JWT.
+    """
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        auth_header = request.META.get('HTTP_AUTHORIZATION', '')
+        if not auth_header.startswith('Token '):
+            return Response({'detail': 'Authorization header with Token required.'}, status=status.HTTP_400_BAD_REQUEST)
+        token_key = auth_header.split(' ', 1)[1].strip()
+        try:
+            token = Token.objects.select_related('user').get(key=token_key)
+        except Token.DoesNotExist:
+            return Response({'detail': 'Invalid token.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = token.user
+        jwt_refresh = RefreshToken.for_user(user)
+        return Response({'access': str(jwt_refresh.access_token), 'refresh': str(jwt_refresh)}, status=status.HTTP_200_OK)
 
 
 class ProviderMyProfileView(APIView):

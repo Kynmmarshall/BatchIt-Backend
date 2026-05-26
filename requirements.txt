@@ -12,3 +12,4 @@ psycopg[binary]>=3.1.0 # PostgreSQL driver for Django 6.0+
 gunicorn>=20.1.0 # WSGI HTTP server for UNIX
 google-auth==2.30.0 # Google ID token verification
 requests>=2.31.0 # HTTP library required by google-auth
+djangorestframework-simplejwt>=5.2.0

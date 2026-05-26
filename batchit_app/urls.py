@@ -3,6 +3,10 @@ from rest_framework import permissions
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
 from . import views
+from rest_framework_simplejwt.views import (
+    TokenObtainPairView,
+    TokenRefreshView,
+)
 
 schema_view = get_schema_view(
     openapi.Info(
@@ -28,11 +32,14 @@ urlpatterns = [
     path('auth/logout/', views.LogoutView.as_view(), name='auth-logout'),
     path('auth/me/', views.MeView.as_view(), name='auth-me'),
     path('auth/refresh/', views.RefreshTokenView.as_view(), name='auth-refresh'),
+    path('token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
+    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('auth/update-profile/', views.UpdateProfileView.as_view(), name='auth-update-profile'),
     path('auth/send-verification-code/', views.SendVerificationCodeView.as_view(), name='send-verification-code'),
     path('auth/verify-email-code/', views.VerifyEmailCodeView.as_view(), name='verify-email-code'),
     path('auth/register-verify/', views.RegisterWithVerificationView.as_view(), name='register-verify'),
     path('auth/google-login/', views.GoogleLoginView.as_view(), name='auth-google-login'),
+    path('auth/exchange-token/', views.ExchangeTokenView.as_view(), name='auth-exchange-token'),
 
     # Customer URLs
     path('customers/', views.CustomerListCreate.as_view(), name='customer-list-create'),
