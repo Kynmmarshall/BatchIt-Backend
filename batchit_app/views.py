@@ -1203,14 +1203,23 @@ class ProviderDocumentDownloadView(APIView):
         if index < 0 or index >= len(docs):
             return Response({'detail': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
 
-        relative = docs[index]
-        docs_root = settings.MEDIA_ROOT
-        absolute = os.path.normpath(os.path.join(docs_root, relative))
-        normalized_root = os.path.normpath(docs_root)
+        relative = str(docs[index]).replace('\\', '/')
+        candidate_roots = [
+            os.path.normpath(settings.MEDIA_ROOT),
+            os.path.normpath(os.path.join(settings.MEDIA_ROOT, 'provider_documents')),
+            os.path.normpath(os.path.join(settings.BASE_DIR, 'providerDocs')),
+        ]
 
-        if not absolute.startswith(normalized_root):
-            raise Http404('Invalid document path.')
-        if not os.path.exists(absolute):
+        absolute = None
+        for root in candidate_roots:
+            candidate = os.path.normpath(os.path.join(root, relative))
+            if not candidate.startswith(root):
+                continue
+            if os.path.exists(candidate):
+                absolute = candidate
+                break
+
+        if absolute is None:
             raise Http404('Document file not found.')
 
         return FileResponse(open(absolute, 'rb'), as_attachment=True, filename=os.path.basename(absolute))
