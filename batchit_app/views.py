@@ -1257,15 +1257,22 @@ class AdminProviderVerifyView(APIView):
             provider.save(update_fields=['status', 'verified', 'rejection_message'])
             notif_type = 'provider_approved'
             title = 'Provider profile approved!'
-            body = f'Congratulations! Your provider profile "{provider.business_name}" has been approved.'
+            body = (
+                f'Congratulations! Your provider profile "{provider.business_name}" '
+                'has been approved.'
+            )
         else:
             provider.status = 'rejected'
             provider.verified = False
-            provider.rejection_message = data.get('rejection_message', '')
+            rejection_message = (data.get('rejection_message') or '').strip() or 'No rejection reason provided.'
+            provider.rejection_message = rejection_message
             provider.save(update_fields=['status', 'verified', 'rejection_message'])
             notif_type = 'provider_rejected'
             title = 'Provider profile rejected'
-            body = f'Your provider profile "{provider.business_name}" was rejected. Reason: {provider.rejection_message}'
+            body = (
+                f'Your provider profile "{provider.business_name}" was rejected. '
+                f'Reason: {rejection_message}'
+            )
 
         # Notify the provider owner
         try:
