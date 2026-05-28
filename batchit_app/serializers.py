@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from rest_framework.authtoken.models import Token
 from django.contrib.auth import authenticate
+from django.conf import settings
 from .models import (
     Customer, Provider, Product, Batch, BatchParticipant, Subscription,
     EmailVerificationCode, Notification, UserSettings, BatchChatRoom,
@@ -136,8 +137,8 @@ class ProviderSerializer(serializers.ModelSerializer):
     def get_document_urls(self, obj):
         request = self.context.get('request')
         urls = []
-        for index, _ in enumerate(obj.document_paths or []):
-            relative = f'/api/providers/{obj.provider_id}/documents/{index}/download/'
+        for relative_path in obj.document_paths or []:
+            relative = f'{settings.MEDIA_URL}{relative_path}'
             if request:
                 urls.append(request.build_absolute_uri(relative))
             else:

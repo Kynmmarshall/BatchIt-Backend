@@ -994,7 +994,7 @@ class ProviderMyProfileView(APIView):
         # Optional document append
         documents = request.FILES.getlist('documents')
         if documents:
-            docs_dir = os.path.join(settings.BASE_DIR, 'providerDocs')
+            docs_dir = os.path.join(settings.MEDIA_ROOT, 'provider_documents')
             provider_dir = os.path.join(docs_dir, str(provider.provider_id))
             os.makedirs(provider_dir, exist_ok=True)
             stored_paths = list(provider.document_paths or [])
@@ -1006,7 +1006,9 @@ class ProviderMyProfileView(APIView):
                 with open(absolute_path, 'wb+') as f:
                     for chunk in doc.chunks():
                         f.write(chunk)
-                stored_paths.append(os.path.join(str(provider.provider_id), safe_name).replace('\\', '/'))
+                stored_paths.append(
+                    os.path.join('provider_documents', str(provider.provider_id), safe_name).replace('\\', '/')
+                )
             provider.document_paths = stored_paths
             update_fields.append('document_paths')
 
@@ -1125,7 +1127,7 @@ class ProviderRegisterView(APIView):
 
         documents = request.FILES.getlist('documents')
         if documents:
-            docs_dir = os.path.join(settings.BASE_DIR, 'providerDocs')
+            docs_dir = os.path.join(settings.MEDIA_ROOT, 'provider_documents')
             provider_dir = os.path.join(docs_dir, str(provider.provider_id))
             os.makedirs(provider_dir, exist_ok=True)
             stored_paths = []
@@ -1137,7 +1139,9 @@ class ProviderRegisterView(APIView):
                 with open(absolute_path, 'wb+') as f:
                     for chunk in doc.chunks():
                         f.write(chunk)
-                stored_paths.append(os.path.join(str(provider.provider_id), safe_name).replace('\\', '/'))
+                stored_paths.append(
+                    os.path.join('provider_documents', str(provider.provider_id), safe_name).replace('\\', '/')
+                )
             provider.document_paths = stored_paths
             provider.save(update_fields=['document_paths'])
             logger.info('[ProviderRegisterView.post] stored %s documents for provider=%s', len(stored_paths), provider.provider_id)
@@ -1200,7 +1204,7 @@ class ProviderDocumentDownloadView(APIView):
             return Response({'detail': 'Document not found.'}, status=status.HTTP_404_NOT_FOUND)
 
         relative = docs[index]
-        docs_root = os.path.join(settings.BASE_DIR, 'providerDocs')
+        docs_root = settings.MEDIA_ROOT
         absolute = os.path.normpath(os.path.join(docs_root, relative))
         normalized_root = os.path.normpath(docs_root)
 
