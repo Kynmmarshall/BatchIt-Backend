@@ -1,4 +1,5 @@
 import os
+import shutil
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -991,13 +992,15 @@ class ProviderMyProfileView(APIView):
             provider.logo_url = request.build_absolute_uri(settings.MEDIA_URL + f'provider_logos/{filename}')
             update_fields.append('logo_url')
 
-        # Optional document append
+        # Optional document replacement (new upload overrides old docs)
         documents = request.FILES.getlist('documents')
         if documents:
             docs_dir = os.path.join(settings.MEDIA_ROOT, 'provider_documents')
             provider_dir = os.path.join(docs_dir, str(provider.provider_id))
+            if os.path.isdir(provider_dir):
+                shutil.rmtree(provider_dir)
             os.makedirs(provider_dir, exist_ok=True)
-            stored_paths = list(provider.document_paths or [])
+            stored_paths = []
             import uuid as _doc_uuid
             for doc in documents:
                 ext = os.path.splitext(doc.name)[1]
